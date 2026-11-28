@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { focusTerminalTabSurface } from '@/components/terminal-pane/input/focus/focus-terminal-tab-surface'
 import type { WindowsTerminalCapabilities } from '@/runtime/hosts/capabilities/windows-terminal-capabilities'
 import { useAppStore } from '../../../store/index'
-import { useTabAgentMenuLaunch } from '../../agent/launch-menu/AgentMenuItems'
+import { useTabAgentMenuLaunch } from '../../agent/launch-menu/use-tab-agent-menu-launch'
 import { requestNativeChatComposerFocus } from '@/components/native-chat/composer/focus/native-chat-composer-focus-intent'
 import { useNewTabAgentMenuRows } from '../../agent/launch-menu/use-new-tab-agent-menu-rows'
 import type { AgentDetectionTarget } from '@/lib/agent-session/launch/inventory/useDetectedAgents'
@@ -211,6 +211,9 @@ export function useTabBarCreateMenuController({
         break
       case 'new-markdown':
         onNewFileTab?.()
+        break
+      case 'new-file':
+        void useAppStore.getState().openNewFileInActiveWorkspace(resolvedGroupId)
         break
       case 'open-markdown':
         onOpenFileTab?.()

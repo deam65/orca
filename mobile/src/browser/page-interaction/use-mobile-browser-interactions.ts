@@ -20,7 +20,6 @@ import {
   type BrowserZoomState,
   type BrowserPoint
 } from './browser-touch-geometry'
-import type { BrowserPointerModifier } from '../pane-view/MobileBrowserPointerModifiers'
 import type { BrowserDialogState } from '../screencast/mobile-browser-stream-events'
 import type { BrowserPageCommandSend, BrowserPageParams } from './use-mobile-browser-request'
 import type { BrowserScreencastFrameMetadata } from '../screencast/browser-screencast-protocol'
@@ -45,21 +44,17 @@ type MobileBrowserInteractionArgs = {
   gestureCancelledRef: { current: boolean }
   frameGeometry: BrowserFrameGeometry | null
   frameMetadataRef: { current: BrowserScreencastFrameMetadata | null }
-  keyboardValue: string
   layoutRef: { current: BrowserTouchLayout | null }
   longPressTimerRef: { current: ReturnType<typeof setTimeout> | null }
   onToast: (message: string, durationMs?: number) => void
   pageParams: () => BrowserPageParams | null
   panRef: { current: PanGesture | null }
   pinchRef: { current: PinchGesture | null }
-  pointerModifiers: BrowserPointerModifier[]
   sendBrowserRequest: SendBrowserRequest
   setDialog: Dispatch<SetStateAction<BrowserDialogState | null>>
   setError: Dispatch<SetStateAction<string | null>>
-  setKeyboardValue: Dispatch<SetStateAction<string>>
   scrollingRef: { current: boolean }
   startPointRef: { current: { x: number; y: number; t: number } | null }
-  setPointerModifiers: Dispatch<SetStateAction<BrowserPointerModifier[]>>
   setZoom: Dispatch<SetStateAction<BrowserZoomState>>
   zoomRef: { current: BrowserZoomState }
 }
@@ -67,14 +62,21 @@ type MobileBrowserInteractionArgs = {
 export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs) {
   const {
     clearLongPressTimer,
+    client,
     pageCoveredRef,
     gestureCancelledRef,
     frameGeometry,
+    frameMetadataRef,
+    layoutRef,
     longPressTimerRef,
     onToast,
+    pageParams,
     panRef,
     pinchRef,
     scrollingRef,
+    sendBrowserRequest,
+    setDialog,
+    setError,
     setZoom,
     startPointRef,
     zoomRef
@@ -86,15 +88,18 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
   const lastScrollPointRef = useRef<BrowserPoint | null>(null)
   const velocityRef = useRef(createTouchScrollVelocity())
 
-  const {
-    mapTouchPoint,
-    sendDialogCommand,
-    sendKeyboardText,
-    sendKeypress,
-    sendPointerClick,
-    sendWheel,
-    togglePointerModifier
-  } = useMobileBrowserCommands(args)
+  const { mapTouchPoint, pageInput, sendDialogCommand, sendPointerClick, sendWheel } =
+    useMobileBrowserCommands({
+      client,
+      frameMetadataRef,
+      layoutRef,
+      onToast,
+      pageParams,
+      sendBrowserRequest,
+      setDialog,
+      setError,
+      zoomRef
+    })
 
   const { cancelMomentum, startMomentum } = useBrowserScrollMomentum({
     pageCoveredRef,
@@ -300,12 +305,5 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
     [pageCoveredRef]
   )
 
-  return {
-    cancelMomentum,
-    panResponder,
-    sendDialogCommand,
-    sendKeyboardText,
-    sendKeypress,
-    togglePointerModifier
-  }
+  return { cancelMomentum, panResponder, pageInput, sendDialogCommand }
 }

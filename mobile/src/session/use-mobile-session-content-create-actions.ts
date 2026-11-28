@@ -1,4 +1,5 @@
-import { normalizeBrowserUrl } from '../browser/pane-view/browser-url'
+import { isBlankBrowserUrl, normalizeBrowserUrl } from '../browser/pane-view/browser-url'
+import { markNewBrowserTabForAddressFocus } from '../browser/pane-view/new-browser-tab-address-focus'
 import { translate } from '../i18n/mobile-i18n'
 import { captureMobileFileMutationOwnership } from '../files/mutation-ownership/mobile-file-mutation-ownership'
 import {
@@ -151,6 +152,10 @@ export function useMobileSessionContentCreateActions(
         // Tabs opened from mobile default to mobile view; users can still toggle back to web.
         saveMobileBrowserViewMode(worktreeId, created.browserPageId, 'mobile')
         pendingBrowserFocusPageIdRef.current = created.browserPageId
+        // A blank tab has nothing to show yet, so its address field takes the first tap's place.
+        if (isBlankBrowserUrl(url)) {
+          markNewBrowserTabForAddressFocus(created.browserPageId)
+        }
       }
       void fetchSessionTabs()
       scheduleDelayedAction(() => void fetchPendingBrowserSessionTabs(), 400)
