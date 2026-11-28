@@ -46,6 +46,8 @@ export type NewWorktreeFolderSubmit = {
 export type NewWorktreeModalProps = {
   visible: boolean
   client: RpcClient | null
+  /** The paired desktop's capabilities (e.g. whether mobile folder-workspace creation is allowed). */
+  hostCapabilities?: readonly string[]
   /** The desktop's servers this phone can reach now; their repos are offered and created there. */
   serverClients?: ReadonlyMap<ExecutionHostId, RpcClient>
   hostId?: string

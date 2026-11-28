@@ -27,7 +27,7 @@ export const AGENT_LAUNCH_PLACEMENT_RUNTIME_CAPABILITY = 'agent.launch.placement
 export const AGENT_LAUNCH_LOCAL_PRESENTATION_RUNTIME_CAPABILITY =
   'agent.launch.local-presentation.v1' as const
 
-// Gate folder launch on this host capability plus folderWorkspace.create authorization; mobile scope lacks that permission.
+// Gate folder launch on this host capability plus folderWorkspace.create authorization.
 export const AGENT_LAUNCH_CREATE_FOLDER_WORKSPACE_RUNTIME_CAPABILITY =
   'agent.launch.create-folder-workspace.v1' as const
 

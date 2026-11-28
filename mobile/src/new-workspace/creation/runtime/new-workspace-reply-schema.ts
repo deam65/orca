@@ -3,6 +3,7 @@ import type { SetupRunPolicy } from '../../../../../src/shared/workspace-setup/o
 import {
   hostUnionArms,
   salvagedOptional,
+  salvagingArray,
   salvagingRecord
 } from '../../../../../src/shared/validation/zod-salvage'
 
@@ -39,6 +40,40 @@ export const newWorkspaceRepoHooksSchema = z.looseObject({
   setupTrust: salvagedOptional(
     'setupTrust',
     z.looseObject({ contentHash: z.string(), scriptContent: z.string() }).nullable()
+  )
+})
+
+// Matches projectGroup.checkHooks; keeps setup script and defaultTabs commands intact for trust hashing.
+const groupHooksPayloadSchema = z
+  .looseObject({
+    scripts: salvagedOptional(
+      'scripts',
+      z.looseObject({ setup: salvagedOptional('setup', z.string()) })
+    ),
+    defaultTabs: salvagedOptional(
+      'defaultTabs',
+      salvagingArray(
+        z.looseObject({
+          title: salvagedOptional('title', z.string()),
+          command: salvagedOptional('command', z.string())
+        })
+      )
+    )
+  })
+  .nullable()
+
+export const newWorkspaceGroupHooksSchema = z.looseObject({
+  hooks: salvagedOptional('hooks', groupHooksPayloadSchema),
+  setupRunPolicy: salvagedOptional('setupRunPolicy', z.enum(SETUP_RUN_POLICIES)),
+  setupConfig: salvagedOptional(
+    'setupConfig',
+    z
+      .looseObject({
+        command: z.string(),
+        kind: salvagedOptional('kind', z.string()),
+        source: salvagedOptional('source', z.string())
+      })
+      .nullable()
   )
 })
 

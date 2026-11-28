@@ -1,12 +1,9 @@
 import { settingsRead } from '../../../settings/mobile-settings-read-operations'
-import { useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import type { PersistedTrustedOrcaHooks } from '../../../../../src/shared/workspace-setup/orca-yaml-hook-types'
-import type { RetiredNameRegistry } from '../../../../../src/shared/worktree/naming/retired-name-registry'
-import type { RpcClient } from '../../../transport/rpc/rpc-client-contract'
+import { useRef, useState } from 'react'
 import { folderCreateBusyMessage, uncertainCreateMessage } from './new-workspace-create-copy'
 import { triggerError, triggerSuccess } from '../../../platform/haptics/haptics'
-import type { WorktreeCreateParent } from '../worktree-create-retry'
 import { createBlankWorkspace } from '../blank-workspace-create'
+import { submitFolderWorkspaceCreate } from '../folder-workspace-create'
 import { isMobileTuiAgentEnabled } from '../../../agents/mobile-tui-agents'
 import { createSetupNeedsTrustCheck, resolveCreateSetupApproval } from '../setup-hook-trust'
 import {
@@ -17,80 +14,25 @@ import {
 } from '../source-workspace-create'
 import { createdSetupReviewPrompt } from '../created-worktree-setup-review'
 import { saveStartupPolicy } from './setup-agent-startup-policy-save'
-import {
-  useNewWorkspaceSetupTrust,
-  type CreateOptions,
-  type SheetSetupTrustPrompt
-} from './use-new-workspace-setup-trust'
+import { useNewWorkspaceSetupTrust, type CreateOptions } from './use-new-workspace-setup-trust'
 import { normalizeWorkspaceAgent } from '../workspace-agent-selection'
 import type { SetupDecision as WorkspaceCreateSetupDecision } from '../../../../../src/shared/worktree/create-types'
-import type { AgentLaunchSupport } from '../../../session/agent-launch/agent-launch-request'
-import type { WorkspaceSshGate } from '../workspace-ssh-gate'
-import type { useMobileComposerSource } from '../../source-selection/use-mobile-composer-source'
-import type { WorktreeCreateIdempotencySupport } from '../worktree-create-idempotency-policy'
 import {
   pickPreferredNewWorktreeAgent,
-  type NewWorktreeAgentOption,
   type NewWorktreeRuntimeSettings
 } from './new-worktree-agent-selection'
-import type {
-  MobileWorkspaceRepo,
-  NewWorktreeFolderSubmission,
-  NewWorktreeFolderSubmit,
-  SetupRunPolicy
-} from '../forms/new-worktree-modal-types'
-import {
-  getRepoExecutionHostId,
-  type ExecutionHostId
-} from '../../../../../src/shared/execution-host/execution-host'
+import type { NewWorktreeFolderSubmission } from '../forms/new-worktree-modal-types'
+import { getRepoExecutionHostId } from '../../../../../src/shared/execution-host/execution-host'
 import { isRpcDeliveryUnknown } from '../../../transport/rpc/rpc-delivery-ambiguity'
-import type { NewWorktreeDrawerView } from '../modal/use-new-worktree-drawer-navigation'
 import { suggestCreatureNameForPaths as getSuggestedCreatureName } from '../../../../../src/shared/worktree/naming/worktree-name-suggestion'
+import type {
+  UseNewWorkspaceCreateSubmitArgs,
+  UseNewWorkspaceCreateSubmitResult
+} from './new-workspace-create-submit-types'
 
-type Composer = ReturnType<typeof useMobileComposerSource>
-
-export function useNewWorkspaceCreateSubmit(args: {
-  client: RpcClient | null
-  repos: readonly MobileWorkspaceRepo[]
-  selectedRepo: MobileWorkspaceRepo | null
-  selectedAgent: NewWorktreeAgentOption
-  setSelectedAgent: (agent: NewWorktreeAgentOption) => void
-  setAgentOverridden: (overridden: boolean) => void
-  runtimeSettings: NewWorktreeRuntimeSettings | null
-  setRuntimeSettings: (settings: NewWorktreeRuntimeSettings) => void
-  detectedAgentIds: Set<string> | null
-  sshGate: WorkspaceSshGate
-  composer: Composer
-  note: string
-  existingWorktreePaths?: readonly string[]
-  retiredWorktreeNames: RetiredNameRegistry
-  setupCommand: string | null
-  setupRunPolicy: SetupRunPolicy
-  setupDecisionChoice: Exclude<WorkspaceCreateSetupDecision, 'inherit'> | null
-  runSetup: boolean
-  setupWait: boolean | null
-  trustedOrcaHooks: PersistedTrustedOrcaHooks
-  setTrustedOrcaHooks: (trust: PersistedTrustedOrcaHooks) => void
-  getWorktreeCreateCutoverSupport: () => Promise<WorktreeCreateIdempotencySupport | false>
-  getAgentLaunchSupport: () => Promise<AgentLaunchSupport | false>
-  getBranchIntentSupport: (intent: 'open-existing-v2' | 'create-new') => Promise<boolean>
-  transitionDrawer: (view: Exclude<NewWorktreeDrawerView, 'transition'>) => void
-  setError: Dispatch<SetStateAction<string>>
-  onCreated: (worktreeId: string, name: string, warning?: string) => void
-  onClose: () => void
-  /** Opened from a folder: creates on that folder's host, attached to it, owned by the folder screen. */
-  folderLaunch?: NewWorktreeFolderSubmit & {
-    executionHostId: ExecutionHostId
-    parent: WorktreeCreateParent
-  }
-}): {
-  creating: boolean
-  setupTrustPrompt: SheetSetupTrustPrompt | null
-  create: () => Promise<void>
-  approveSetupTrust: (alwaysTrust: boolean) => Promise<void>
-  closeSetupTrust: () => void
-  skipSetupTrust: () => void
-} {
+export function useNewWorkspaceCreateSubmit(
+  args: UseNewWorkspaceCreateSubmitArgs
+): UseNewWorkspaceCreateSubmitResult {
   const createInFlightRef = useRef(false)
   const [creating, setCreating] = useState(false)
   const setupTrust = useNewWorkspaceSetupTrust({
@@ -109,8 +51,8 @@ export function useNewWorkspaceCreateSubmit(args: {
   })
 
   async function create(options: CreateOptions = {}): Promise<void> {
-    const { client, selectedRepo } = args
-    if (!client || !selectedRepo || createInFlightRef.current) {
+    const { client, selectedRepo, selectedProjectGroup = null } = args
+    if (!client || (!selectedRepo && !selectedProjectGroup) || createInFlightRef.current) {
       return
     }
     createInFlightRef.current = true
@@ -119,7 +61,7 @@ export function useNewWorkspaceCreateSubmit(args: {
     const folder = args.folderLaunch
     // Admitted for the repo actually picked, before anything is sent; the folder screen owns it until it settles.
     const admission = folder
-      ? getRepoExecutionHostId(selectedRepo) === folder.executionHostId
+      ? selectedRepo && getRepoExecutionHostId(selectedRepo) === folder.executionHostId
         ? folder.begin(selectedRepo)
         : null
       : undefined
@@ -131,7 +73,8 @@ export function useNewWorkspaceCreateSubmit(args: {
         return
       }
       if (args.sshGate.requiresConnection) {
-        args.setError(`Connect ${selectedRepo.displayName} before creating a workspace.`)
+        const targetName = selectedProjectGroup?.name ?? selectedRepo?.displayName ?? ''
+        args.setError(`Connect ${targetName} before creating a workspace.`)
         return
       }
       let latestRuntimeSettings = args.runtimeSettings
@@ -158,6 +101,66 @@ export function useNewWorkspaceCreateSubmit(args: {
         return
       }
 
+      let setupDecision: WorkspaceCreateSetupDecision = 'inherit'
+      if (options.setupOverride) {
+        setupDecision = options.setupOverride
+      } else if (args.setupCommand) {
+        if (args.setupRunPolicy === 'ask') {
+          if (!args.setupDecisionChoice) {
+            args.setError('Choose whether to run the setup script.')
+            return
+          }
+          setupDecision = args.setupDecisionChoice
+        } else {
+          setupDecision = args.runSetup ? 'run' : 'skip'
+        }
+      }
+      const createdWithAgentId =
+        args.selectedAgent.id !== '__blank__' ? args.selectedAgent.id : undefined
+
+      if (selectedProjectGroup && !selectedRepo) {
+        const submitted = await submitFolderWorkspaceCreate({
+          client,
+          group: selectedProjectGroup,
+          repos: args.repos,
+          name: args.composer.name,
+          createdWithAgentId,
+          setupDecision,
+          setupRunPolicy: args.setupRunPolicy,
+          setupApproval: options.setupApproval,
+          trustedOrcaHooks: args.trustedOrcaHooks,
+          agentLaunchSupported: args.getAgentLaunchSupport()
+        })
+        if (submitted.kind === 'error') {
+          outcome = submitted.uncertain ? 'uncertain' : 'failed'
+          if (!submitted.uncertain && presenting()) {
+            triggerError()
+          }
+          args.setError(submitted.message)
+          return
+        }
+        if (submitted.kind === 'ask-trust') {
+          if (submitted.prompt.created) {
+            outcome = 'created'
+            if (presenting()) {
+              triggerSuccess()
+            }
+          }
+          setupTrust.ask(submitted.prompt)
+          return
+        }
+        outcome = 'created'
+        if (presenting()) {
+          triggerSuccess()
+        }
+        args.onClose()
+        args.onCreated(submitted.worktreeId, submitted.name, submitted.warning)
+        return
+      }
+      if (!selectedRepo) {
+        return
+      }
+
       const trimmedName = args.composer.name.trim()
       const baseName =
         trimmedName ||
@@ -180,20 +183,6 @@ export function useNewWorkspaceCreateSubmit(args: {
       if (!setupRepo) {
         args.setError("This item's project isn't available on this host.")
         return
-      }
-      let setupDecision: WorkspaceCreateSetupDecision = 'inherit'
-      if (options.setupOverride) {
-        setupDecision = options.setupOverride
-      } else if (args.setupCommand) {
-        if (args.setupRunPolicy === 'ask') {
-          if (!args.setupDecisionChoice) {
-            args.setError('Choose whether to run the setup script.')
-            return
-          }
-          setupDecision = args.setupDecisionChoice
-        } else {
-          setupDecision = args.runSetup ? 'run' : 'skip'
-        }
       }
       let setupApproval = options.setupApproval
       // The checkout may lack setup the created branch has, so check whenever setup isn't skipped.
@@ -219,8 +208,6 @@ export function useNewWorkspaceCreateSubmit(args: {
       if (!(await saveStartupPolicy(client, setupRepo, args.setupWait, args.setError))) {
         return
       }
-      const createdWithAgentId =
-        args.selectedAgent.id !== '__blank__' ? args.selectedAgent.id : undefined
       const trimmedNote = args.note.trim() || undefined
       const result = selection
         ? await createWorkspaceFromComposerSource({

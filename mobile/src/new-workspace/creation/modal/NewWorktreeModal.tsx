@@ -1,18 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Keyboard } from 'react-native'
 import { getComposerRepoWorktreeBranches } from '../../../../../src/shared/new-workspace/composer-branch-selection'
-import {
-  getRepoExecutionHostId,
-  parseExecutionHostId
-} from '../../../../../src/shared/execution-host/execution-host'
-import { getProjectIdentityKey } from '../../../../../src/shared/project/host-setup/project-host-setup-projection'
+import type { ProjectGroup } from '../../../../../src/shared/project/groups/project-group-types'
 import { shouldPreserveWorkspaceSourceOnRepoChange } from '../../../../../src/shared/new-workspace/workspace-source'
 import { useMobileTranslation } from '../../../i18n/use-mobile-translation'
 import type { SmartModeAvailabilityInput } from '../../source-selection/mobile-smart-source-modes'
-import {
-  deriveRepoSlug,
-  type PasteRepoCandidate
-} from '../../source-selection/smart-source-paste-intent'
 import { useMobileComposerSource } from '../../source-selection/use-mobile-composer-source'
 import { useNewWorktreeRuntimeCapabilities } from '../worktree-create-capability'
 import { useWorktreeCreateBasePrefetch } from '../use-worktree-create-base-prefetch'
@@ -31,25 +23,22 @@ import {
   type NewWorktreeModalProps
 } from '../forms/new-worktree-modal-types'
 import {
-  buildNewWorkspaceProjectOptions,
-  buildNewWorkspaceRunTargetOptions,
-  getNewWorkspaceRunTarget
+  resolveNewWorkspaceTargetView,
+  serverOfWorkspaceTarget
 } from '../../source-selection/presentation/new-workspace-project-targets'
 import { NewWorktreeFormSheet } from '../forms/NewWorktreeFormSheet'
 import { NewWorktreeModalDrawers } from './NewWorktreeModalDrawers'
 import { useNewWorkspaceAgentSelection } from '../runtime/use-new-workspace-agent-selection'
 import { useNewWorkspaceCreateSubmit } from '../runtime/use-new-workspace-create-submit'
 import { useNewWorkspaceExecutionTarget } from '../runtime/use-new-workspace-execution-target'
+import {
+  isSameMobileProjectGroup,
+  useNewWorkspaceProjectGroups
+} from '../runtime/use-new-workspace-project-groups'
 import { useNewWorkspaceRepositories } from '../runtime/use-new-workspace-repositories'
 import { useNewWorkspaceRuntimeContext } from '../runtime/use-new-workspace-runtime-context'
 import { useNewWorkspaceSetupScript } from '../runtime/use-new-workspace-setup-script'
 import { useNewWorktreeDrawerNavigation } from './use-new-worktree-drawer-navigation'
-
-/** The server a repo runs on; undefined for the desktop's own (local, SSH, folder). */
-function serverOf(repo: MobileWorkspaceRepo): `runtime:${string}` | undefined {
-  const host = parseExecutionHostId(getRepoExecutionHostId(repo))
-  return host?.kind === 'runtime' ? host.id : undefined
-}
 
 export function NewWorktreeModal(props: NewWorktreeModalProps) {
   // Remount fresh form before paint per committed opening. Use state, not render-mutated ref counter: react-freeze may discard opening renders.
@@ -70,6 +59,7 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
   const {
     visible,
     client: desktopClient,
+    hostCapabilities,
     serverClients,
     hostId,
     hostLabelById,
@@ -80,20 +70,45 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
     onClose,
     folderLaunch
   } = props
-  const { repos, allRepos, selectedRepo, setSelectedRepo, loading, loadError, retryLoad } =
-    useNewWorkspaceRepositories({
-      client: desktopClient,
-      serverClients,
-      hostId,
-      visible,
-      ...(folderLaunch
-        ? {
-            initialRepo: { id: folderLaunch.repoId, executionHostId: folderLaunch.executionHostId }
-          }
-        : {})
-    })
-  // Route picked-repo operations to its host; desktop settings/accounts stay on desktop.
-  const repoServer = selectedRepo ? serverOf(selectedRepo) : undefined
+  const {
+    repos,
+    allRepos,
+    selectedRepo: pickedOrDefaultRepo,
+    setSelectedRepo,
+    loading: loadingRepos,
+    loadError: repoLoadError,
+    retryLoad
+  } = useNewWorkspaceRepositories({
+    client: desktopClient,
+    serverClients,
+    hostId,
+    visible,
+    ...(folderLaunch
+      ? {
+          initialRepo: { id: folderLaunch.repoId, executionHostId: folderLaunch.executionHostId }
+        }
+      : {})
+  })
+  const {
+    projectGroups,
+    selectedProjectGroup,
+    setSelectedProjectGroup,
+    loading: loadingProjectGroups
+  } = useNewWorkspaceProjectGroups({
+    client: desktopClient,
+    serverClients,
+    desktopCapabilities: hostCapabilities,
+    visible,
+    disabled: Boolean(folderLaunch),
+    autoSelectFirst: repos.length === 0 && !loadingRepos
+  })
+  const selectedRepo = selectedProjectGroup ? null : pickedOrDefaultRepo
+  const activeTarget = selectedProjectGroup ?? selectedRepo
+  const hasTargets = repos.length > 0 || projectGroups.length > 0
+  const loading = (loadingRepos || loadingProjectGroups) && !hasTargets
+  const loadError = hasTargets ? null : repoLoadError
+  // Route picked-target operations to its host; desktop settings/accounts stay on desktop.
+  const repoServer = activeTarget ? serverOfWorkspaceTarget(activeTarget) : undefined
   const client = repoServer ? (serverClients?.get(repoServer) ?? null) : desktopClient
   const navigation = useNewWorktreeDrawerNavigation(visible)
   // Kept per desktop until a create succeeds, and read only once the form shows. The host is in the key
@@ -114,20 +129,20 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
   // The desktop's own run target is named for the desktop, whichever host the picked repo is on.
   const desktopPlatform = useHostDescriptor(hostId)?.platform ?? null
   const hostPlatform = repoServer ? desktopPlatform : repoRuntime.hostPlatform
-  const selectedRepoConnectionId = selectedRepo?.connectionId ?? null
+  const selectedRepoConnectionId = activeTarget?.connectionId ?? null
   const executionTarget = useNewWorkspaceExecutionTarget({
     client,
     connectionId: selectedRepoConnectionId,
     repoId: selectedRepo?.id,
     visible
   })
-  const setupScript = useNewWorkspaceSetupScript({ client, selectedRepo })
+  const setupScript = useNewWorkspaceSetupScript({ client, selectedRepo, selectedProjectGroup })
   // A kept note opens Options until the user folds them, so it isn't sent unseen.
   const [noteOptions, setNoteOptions] = useState<'closed' | 'open' | 'folded'>('closed')
   if (note && noteOptions === 'closed') {
     setNoteOptions('open')
   }
-  const showOptions = setupScript.showAdvanced || noteOptions === 'open'
+  const showOptions = setupScript.showAdvanced || (!selectedProjectGroup && noteOptions === 'open')
   const selectedRepoWorktreeBranches = useMemo(
     () => getComposerRepoWorktreeBranches(existingWorktrees ?? [], selectedRepo?.id ?? null),
     [existingWorktrees, selectedRepo]
@@ -146,7 +161,11 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
       composer.setName(folderLaunch.name)
     }
   }, [composer, folderLaunch])
-  const selectedRepoIsGit = selectedRepo ? selectedRepo.kind !== 'folder' : true
+  const selectedRepoIsGit = selectedProjectGroup
+    ? false
+    : selectedRepo
+      ? selectedRepo.kind !== 'folder'
+      : true
   useWorktreeCreateBasePrefetch({
     client: visible ? client : null,
     repoId: selectedRepo?.id ?? null,
@@ -171,6 +190,7 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
     client,
     repos: allRepos,
     selectedRepo,
+    selectedProjectGroup,
     selectedAgent: agentSelection.selectedAgent,
     setSelectedAgent: agentSelection.setSelectedAgent,
     setAgentOverridden: agentSelection.setAgentOverridden,
@@ -196,7 +216,9 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
     setError,
     onCreated: (worktreeId, name, warning) => {
       // A note typed in a reopened form while this create ran is not the one it sent.
-      setNote((current) => (current === note ? '' : current))
+      if (!selectedProjectGroup) {
+        setNote((current) => (current === note ? '' : current))
+      }
       onCreated(worktreeId, name, warning, repoServer)
     },
     onClose,
@@ -215,7 +237,7 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
   })
 
   const sourceAvailability: SmartModeAvailabilityInput = {
-    textOnly: selectedRepo != null && !selectedRepoIsGit,
+    textOnly: activeTarget != null && !selectedRepoIsGit,
     tasksSupported,
     hasRepo: selectedRepo != null,
     githubAvailable: runtime.availableProviders.includes('github'),
@@ -223,37 +245,42 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
     linearAvailable: runtime.availableProviders.includes('linear'),
     jiraAvailable: runtime.jiraConnection.connected && runtime.availableProviders.includes('jira')
   }
-  // Why one client's: a source's repo switch is looked up through the picked repo's client.
-  const hostRepos = useMemo(
-    () => repos.filter((repo) => serverOf(repo) === repoServer),
-    [repoServer, repos]
-  )
-  const pasteRepos = useMemo<PasteRepoCandidate[]>(
+  const targetView = useMemo(
     () =>
-      hostRepos.map((repo) => ({
-        id: repo.id,
-        displayName: repo.displayName,
-        slug: deriveRepoSlug(repo)
-      })),
-    [hostRepos]
+      resolveNewWorkspaceTargetView({
+        repos,
+        projectGroups,
+        selectedRepo,
+        selectedProjectGroup,
+        repoServer,
+        hostPlatform,
+        hostLabelById
+      }),
+    [
+      hostLabelById,
+      hostPlatform,
+      projectGroups,
+      repoServer,
+      repos,
+      selectedProjectGroup,
+      selectedRepo
+    ]
   )
-  const projectPickerItems = useMemo(() => buildNewWorkspaceProjectOptions(repos), [repos])
-  const selectedProjectId = selectedRepo ? getProjectIdentityKey(selectedRepo) : null
-  const selectedProject =
-    projectPickerItems.find((project) => project.id === selectedProjectId) ?? null
-  const runTargetPickerItems = useMemo(
-    () => buildNewWorkspaceRunTargetOptions(repos, selectedProjectId, hostPlatform, hostLabelById),
-    [hostLabelById, hostPlatform, repos, selectedProjectId]
-  )
-  const selectedRunTarget = selectedRepo
-    ? getNewWorkspaceRunTarget(selectedRepo, hostPlatform, hostLabelById)
-    : null
   const needsSetupChoice = Boolean(setupScript.setupCommand) && setupScript.setupRunPolicy === 'ask'
   const canCreate =
-    selectedRepo != null &&
+    activeTarget != null &&
     !createSubmit.creating &&
     !executionTarget.sshGate.requiresConnection &&
     (!needsSetupChoice || setupScript.setupDecisionChoice != null)
+  const projectBadgeColor = selectedProjectGroup
+    ? (selectedProjectGroup.color ?? null)
+    : selectedRepo
+      ? getMobileWorkspaceRepoBadgeColor(selectedRepo)
+      : null
+  const selectedTargetName =
+    selectedProjectGroup?.name ??
+    selectedRepo?.displayName ??
+    t('components.newWorktreeModal.remoteRepository', 'Remote repository')
 
   function openPicker(view: 'project' | 'runTarget' | 'agent'): void {
     Keyboard.dismiss()
@@ -261,13 +288,25 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
   }
 
   function selectRepo(repo: MobileWorkspaceRepo, clearRepoScopedSource: boolean): void {
-    const repoChanged = !selectedRepo || !isSameMobileWorkspaceRepo(repo, selectedRepo)
+    const repoChanged =
+      selectedProjectGroup !== null ||
+      !selectedRepo ||
+      !isSameMobileWorkspaceRepo(repo, selectedRepo)
+    setSelectedProjectGroup(null)
     setSelectedRepo(repo)
     if (
       clearRepoScopedSource &&
       repoChanged &&
       !shouldPreserveWorkspaceSourceOnRepoChange(composer.linkedWorkItem)
     ) {
+      composer.handleClearSmartNameSelection()
+    }
+  }
+
+  function selectProjectGroup(group: ProjectGroup): void {
+    const changed = !selectedProjectGroup || !isSameMobileProjectGroup(group, selectedProjectGroup)
+    setSelectedProjectGroup(group)
+    if (changed) {
       composer.handleClearSmartNameSelection()
     }
   }
@@ -288,18 +327,17 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
         visible={navigation.formSheetVisible}
         interactive={navigation.formSheetInteractive}
         loading={loading}
-        hasRepos={repos.length > 0}
+        hasRepos={hasTargets}
         loadError={loadError}
         onRetryLoad={retryLoad}
-        project={selectedProject}
-        runTarget={selectedRunTarget}
-        projectBadgeColor={selectedRepo ? getMobileWorkspaceRepoBadgeColor(selectedRepo) : null}
+        project={targetView.selectedProject}
+        runTarget={targetView.selectedRunTarget}
+        projectBadgeColor={projectBadgeColor}
+        isFolderTarget={selectedProjectGroup !== null}
+        canPickRunTarget={!selectedProjectGroup && targetView.selectedProject !== null}
         selectedRepoIsGit={selectedRepoIsGit}
         selectedRepoConnectionId={selectedRepoConnectionId}
-        selectedRepoName={
-          selectedRepo?.displayName ??
-          t('components.newWorktreeModal.remoteRepository', 'Remote repository')
-        }
+        selectedRepoName={selectedTargetName}
         sshGate={executionTarget.sshGate}
         composer={composer}
         selectedAgent={agentSelection.selectedAgent}
@@ -342,20 +380,21 @@ function NewWorktreeModalContent(props: NewWorktreeModalProps) {
         composer={composer}
         sourceAvailability={sourceAvailability}
         selectedRepo={selectedRepo}
-        repos={hostRepos}
-        pasteRepos={pasteRepos}
+        repos={targetView.hostRepos}
+        pasteRepos={targetView.pasteRepos}
         jiraSiteId={runtime.jiraConnection.selection}
         jiraSites={runtime.jiraConnection.sites}
         sshReady={!executionTarget.sshGate.requiresConnection}
-        projectPickerItems={projectPickerItems}
-        selectedProjectId={selectedProjectId}
-        runTargetPickerItems={runTargetPickerItems}
+        projectPickerItems={targetView.projectPickerItems}
+        selectedProjectId={targetView.selectedProjectId}
+        runTargetPickerItems={targetView.runTargetPickerItems}
         pickerAgentOptions={agentSelection.pickerAgentOptions}
         selectedAgent={agentSelection.selectedAgent}
         setupTrustPrompt={createSubmit.setupTrustPrompt}
         creating={createSubmit.creating}
         onSourceRepoChange={(repo) => selectRepo(repo, false)}
         onRepoChange={(repo) => selectRepo(repo, true)}
+        onProjectGroupChange={selectProjectGroup}
         onAgentChange={(agent) => {
           agentSelection.setAgentOverridden(true)
           agentSelection.setSelectedAgent(agent)

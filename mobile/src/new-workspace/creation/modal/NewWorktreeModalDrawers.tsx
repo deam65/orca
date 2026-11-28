@@ -1,5 +1,7 @@
 import { View } from 'react-native'
+import { FolderTree } from 'lucide-react-native'
 import { getRepoExecutionHostId } from '../../../../../src/shared/execution-host/execution-host'
+import type { ProjectGroup } from '../../../../../src/shared/project/groups/project-group-types'
 import { useMobileTranslation } from '../../../i18n/use-mobile-translation'
 import type { SmartModeAvailabilityInput } from '../../source-selection/mobile-smart-source-modes'
 import type { PasteRepoCandidate } from '../../source-selection/smart-source-paste-intent'
@@ -10,8 +12,8 @@ import type { NewWorktreeAgentOption } from '../runtime/new-worktree-agent-selec
 import { newWorktreeFormStylesSheet } from '../forms/new-worktree-form-styles'
 import type { MobileWorkspaceRepo } from '../forms/new-worktree-modal-types'
 import type {
-  NewWorkspaceProjectOption,
-  NewWorkspaceRunTargetOption
+  NewWorkspaceRunTargetOption,
+  NewWorkspaceTargetOption
 } from '../../source-selection/presentation/new-workspace-project-targets'
 import { getMobileWorkspaceRepoBadgeColor } from '../forms/new-worktree-modal-types'
 import { PickerListDrawer } from '../../../components/sheets/PickerListDrawer'
@@ -23,6 +25,7 @@ import { SmartWorkspaceSourceDrawer } from '../../source-selection/presentation/
 import type { JiraSite, JiraSiteSelection } from '../../../../../src/shared/jira/jira-types'
 import type { NewWorktreeDrawerView } from './use-new-worktree-drawer-navigation'
 import { useThemedStyles } from '../../../theme/themed-styles'
+import { useMobileColors } from '../../../theme/use-mobile-color-scheme'
 
 type Composer = ReturnType<typeof useMobileComposerSource>
 
@@ -39,7 +42,7 @@ export function NewWorktreeModalDrawers(props: {
   jiraSiteId: JiraSiteSelection | null
   jiraSites: readonly JiraSite[]
   sshReady: boolean
-  projectPickerItems: NewWorkspaceProjectOption<MobileWorkspaceRepo>[]
+  projectPickerItems: NewWorkspaceTargetOption<MobileWorkspaceRepo>[]
   selectedProjectId: string | null
   runTargetPickerItems: NewWorkspaceRunTargetOption<MobileWorkspaceRepo>[]
   pickerAgentOptions: NewWorktreeAgentOption[]
@@ -48,6 +51,7 @@ export function NewWorktreeModalDrawers(props: {
   creating: boolean
   onSourceRepoChange: (repo: MobileWorkspaceRepo) => void
   onRepoChange: (repo: MobileWorkspaceRepo) => void
+  onProjectGroupChange: (group: ProjectGroup) => void
   onAgentChange: (agent: NewWorktreeAgentOption) => void
   onTransitionToForm: () => void
   onApproveSetupTrust: (alwaysTrust: boolean) => void
@@ -55,6 +59,7 @@ export function NewWorktreeModalDrawers(props: {
   onCloseSetupTrust: () => void
 }) {
   const styles = useThemedStyles(newWorktreeFormStylesSheet)
+  const colors = useMobileColors()
   const t = useMobileTranslation()
   return (
     <>
@@ -82,16 +87,24 @@ export function NewWorktreeModalDrawers(props: {
         title={t('components.newWorktreeModalDrawers.project', 'Project')}
         items={props.projectPickerItems}
         selectedId={props.selectedProjectId ?? ''}
-        onSelect={(item) => props.onRepoChange(item.repo)}
+        onSelect={(item) =>
+          item.kind === 'project-group'
+            ? props.onProjectGroupChange(item.group)
+            : props.onRepoChange(item.repo)
+        }
         onClose={props.onTransitionToForm}
-        renderIcon={(item) => (
-          <View
-            style={[
-              styles.repoDot,
-              { backgroundColor: getMobileWorkspaceRepoBadgeColor(item.repo) }
-            ]}
-          />
-        )}
+        renderIcon={(item) =>
+          item.kind === 'project-group' ? (
+            <FolderTree size={16} color={item.group.color ?? colors.textSecondary} />
+          ) : (
+            <View
+              style={[
+                styles.repoDot,
+                { backgroundColor: getMobileWorkspaceRepoBadgeColor(item.repo) }
+              ]}
+            />
+          )
+        }
       />
 
       <PickerListDrawer

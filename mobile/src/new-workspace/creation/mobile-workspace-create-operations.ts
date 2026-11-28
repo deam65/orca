@@ -9,6 +9,7 @@ import { connectionHostStatusRead } from '../../query/host-status-query'
 import {
   agentLaunchCreateReceiptSchema,
   approvedSetupRunSchema,
+  folderWorkspaceCreateReceiptSchema,
   worktreeCreateReceiptSchema,
   worktreeHostedBaseSchema
 } from './workspace-create-reply-schema'
@@ -24,6 +25,16 @@ export const worktreeCreateRun = bindDeferredRpcOperation(
     acceptance: 'require-result-or-throw-message',
     barrier: 'after-caller-barrier',
     read: rpcResultVariant('created-worktree', worktreeCreateReceiptSchema)
+  })
+)
+
+export const folderWorkspaceCreateRun = bindDeferredRpcOperation(
+  defineRpcOperation({
+    name: 'folderWorkspace.create',
+    method: 'folderWorkspace.create',
+    acceptance: 'require-result-or-throw-message',
+    barrier: 'after-caller-barrier',
+    read: rpcResultVariant('created-folder-workspace', folderWorkspaceCreateReceiptSchema)
   })
 )
 

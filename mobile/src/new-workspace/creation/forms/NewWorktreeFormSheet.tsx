@@ -37,6 +37,8 @@ export function NewWorktreeFormSheet(props: {
   project: Selection | null
   runTarget: (Selection & { hostId: string }) | null
   projectBadgeColor: string | null
+  isFolderTarget?: boolean
+  canPickRunTarget?: boolean
   selectedRepoIsGit: boolean
   selectedRepoConnectionId: string | null
   selectedRepoName: string
@@ -112,6 +114,8 @@ export function NewWorktreeFormSheet(props: {
             project={props.project}
             runTarget={props.runTarget}
             projectBadgeColor={props.projectBadgeColor}
+            isFolderTarget={props.isFolderTarget}
+            canPickRunTarget={props.canPickRunTarget}
             onOpenProject={props.onOpenProject}
             onOpenRunTarget={props.onOpenRunTarget}
           />
@@ -155,23 +159,26 @@ export function NewWorktreeFormSheet(props: {
             />
           </ListGroup>
 
-          <NewWorktreeFormOptions
-            expanded={props.showAdvanced}
-            composer={props.composer}
-            selectedRepoIsGit={props.selectedRepoIsGit}
-            note={props.note}
-            setupCommand={props.setupCommand}
-            setupSource={props.setupSource}
-            setupRunPolicy={props.setupRunPolicy}
-            setupDecisionChoice={props.setupDecisionChoice}
-            runSetup={props.runSetup}
-            waitForSetup={props.waitForSetup}
-            onExpandedChange={props.onShowAdvancedChange}
-            onNoteChange={props.onNoteChange}
-            onSetupDecisionChange={props.onSetupDecisionChange}
-            onRunSetupChange={props.onRunSetupChange}
-            onWaitForSetupChange={props.onWaitForSetupChange}
-          />
+          {!props.isFolderTarget || props.setupCommand ? (
+            <NewWorktreeFormOptions
+              expanded={props.showAdvanced}
+              composer={props.composer}
+              selectedRepoIsGit={props.selectedRepoIsGit}
+              showNote={!props.isFolderTarget}
+              note={props.note}
+              setupCommand={props.setupCommand}
+              setupSource={props.setupSource}
+              setupRunPolicy={props.setupRunPolicy}
+              setupDecisionChoice={props.setupDecisionChoice}
+              runSetup={props.runSetup}
+              waitForSetup={props.waitForSetup}
+              onExpandedChange={props.onShowAdvancedChange}
+              onNoteChange={props.onNoteChange}
+              onSetupDecisionChange={props.onSetupDecisionChange}
+              onRunSetupChange={props.onRunSetupChange}
+              onWaitForSetupChange={props.onWaitForSetupChange}
+            />
+          ) : null}
 
           {props.error ? <Text style={styles.error}>{props.error}</Text> : null}
           <View style={styles.footer}>

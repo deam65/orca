@@ -8,8 +8,13 @@ export const NOTIFICATIONS_REMOTE_PUSH_RUNTIME_CAPABILITY = 'notifications.remot
 export const NOTIFICATIONS_PUSH_COVERAGE_RUNTIME_CAPABILITY =
   'notifications.push-coverage.v1' as const
 
+// Hosts that allow mobile clients to create folder workspaces (`folderWorkspace.create`, `projectGroup.checkHooks`).
+export const MOBILE_FOLDER_WORKSPACE_CREATE_RUNTIME_CAPABILITY =
+  'mobile.folder-workspace-create.v1' as const
+
 export const MOBILE_RUNTIME_CAPABILITIES = [
   'mobile.tasks.v1',
+  MOBILE_FOLDER_WORKSPACE_CREATE_RUNTIME_CAPABILITY,
   NOTIFICATIONS_REMOTE_PUSH_RUNTIME_CAPABILITY,
   NOTIFICATIONS_DESKTOP_PRESENCE_RUNTIME_CAPABILITY,
   NOTIFICATIONS_PUSH_COVERAGE_RUNTIME_CAPABILITY,

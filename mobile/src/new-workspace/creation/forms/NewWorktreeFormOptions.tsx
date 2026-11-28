@@ -18,6 +18,7 @@ export function NewWorktreeFormOptions(props: {
   expanded: boolean
   composer: ReturnType<typeof useMobileComposerSource>
   selectedRepoIsGit: boolean
+  showNote?: boolean
   note: string
   setupCommand: string | null
   setupSource: string | null
@@ -33,6 +34,7 @@ export function NewWorktreeFormOptions(props: {
 }) {
   const styles = useThemedStyles(newWorktreeFormStylesSheet)
   const t = useMobileTranslation()
+  const showNote = props.showNote ?? true
   return (
     <>
       <SectionHeader
@@ -46,18 +48,20 @@ export function NewWorktreeFormOptions(props: {
             composer={props.composer}
             selectedRepoIsGit={props.selectedRepoIsGit}
           />
-          <View>
-            <Text style={styles.fieldLabel}>
-              {t('components.newWorktreeFormSheet.note', 'Note')}
-            </Text>
-            <TextField
-              value={props.note}
-              onChangeText={props.onNoteChange}
-              placeholder={t('components.newWorktreeFormSheet.notePlaceholder', 'Write a note')}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
+          {showNote ? (
+            <View>
+              <Text style={styles.fieldLabel}>
+                {t('components.newWorktreeFormSheet.note', 'Note')}
+              </Text>
+              <TextField
+                value={props.note}
+                onChangeText={props.onNoteChange}
+                placeholder={t('components.newWorktreeFormSheet.notePlaceholder', 'Write a note')}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          ) : null}
           {props.setupCommand ? (
             <NewWorkspaceSetupScriptField
               command={props.setupCommand}

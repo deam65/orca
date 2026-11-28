@@ -106,7 +106,8 @@ export const EXECUTION_HOST_METHODS = [
   'files.stat',
   'files.statTerminalArtifact',
   'files.writeTerminalArtifact',
-  // A folder row's Delete removes the Orca workspace on its host, as desktop's Remove Workspace does.
+  // Folder workspace creation and deletion run on the folder's owning host, as on desktop.
+  'folderWorkspace.create',
   'folderWorkspace.delete',
   'folderWorkspace.list',
   'git.abortMerge',
@@ -232,6 +233,7 @@ export const EXECUTION_HOST_METHODS = [
   'orchestration.workerChatTouch',
   'orchestration.workerAutoClose',
   'orchestration.workerKeepOpen',
+  'projectGroup.checkHooks',
   'projectGroup.list',
   'project.list',
   'projectHostSetup.list',

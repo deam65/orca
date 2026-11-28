@@ -2,6 +2,7 @@ import * as z from 'zod'
 import { bindDeferredRpcOperation, defineRpcOperation } from '../../../transport/rpc/rpc-operation'
 import { rpcResultVariant } from '../../../transport/rpc/rpc-operation-result-reader'
 import {
+  newWorkspaceGroupHooksSchema,
   newWorkspaceRepoHooksSchema,
   newWorkspaceUiTrustSchema
 } from './new-workspace-reply-schema'
@@ -17,6 +18,26 @@ export const newWorkspaceSetupHooksRead = bindDeferredRpcOperation(
     acceptance: 'success-result-or-skip',
     barrier: 'after-caller-barrier',
     read: rpcResultVariant('repo-hooks', newWorkspaceRepoHooksSchema)
+  })
+)
+
+export const newWorkspaceGroupSetupHooksRead = bindDeferredRpcOperation(
+  defineRpcOperation({
+    name: 'projectGroup.drawer-setup-hooks-or-skip',
+    method: 'projectGroup.checkHooks',
+    acceptance: 'success-result-or-skip',
+    barrier: 'after-caller-barrier',
+    read: rpcResultVariant('group-hooks', newWorkspaceGroupHooksSchema)
+  })
+)
+
+export const projectGroupSetupHooksCheck = bindDeferredRpcOperation(
+  defineRpcOperation({
+    name: 'projectGroup.setup-hooks',
+    method: 'projectGroup.checkHooks',
+    acceptance: 'require-result-or-throw-message',
+    barrier: 'after-caller-barrier',
+    read: rpcResultVariant('group-hooks', newWorkspaceGroupHooksSchema)
   })
 )
 

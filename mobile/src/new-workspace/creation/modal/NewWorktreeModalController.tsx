@@ -32,6 +32,7 @@ export function NewWorktreeModalController({
       {...modalProps}
       visible={visible}
       client={client}
+      hostCapabilities={hostCapabilities}
       serverClients={serverClients}
       hostLabelById={serverLabelById}
     />

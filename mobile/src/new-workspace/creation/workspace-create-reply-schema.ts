@@ -10,6 +10,11 @@ export const worktreeCreateReceiptSchema = z.looseObject({
   warning: createText('warning')
 })
 
+export const folderWorkspaceCreateReceiptSchema = z.looseObject({
+  folderWorkspace: z.looseObject({ id: z.string(), name: createText('name') }),
+  warning: createText('warning')
+})
+
 // Only `mismatch` changes what the phone says; any other status started or had nothing to run.
 export const approvedSetupRunSchema = z.looseObject({ status: z.string() })
 

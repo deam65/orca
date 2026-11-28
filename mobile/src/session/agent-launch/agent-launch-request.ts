@@ -10,6 +10,7 @@ import {
   type AgentLaunchResult
 } from '../../../../src/shared/agent-launch/contracts/agent-launch-intent'
 import {
+  AGENT_LAUNCH_CREATE_FOLDER_WORKSPACE_RUNTIME_CAPABILITY,
   AGENT_LAUNCH_REPLAY_REQUIRED_RUNTIME_CAPABILITY,
   AGENT_LAUNCH_RUNTIME_CAPABILITY,
   AGENT_LAUNCH_SETUP_TRUST_MISMATCH_RUNTIME_CAPABILITY
@@ -23,6 +24,7 @@ export type AgentLaunchSupport = {
   replay: boolean
   /** Its receipt reports setup the host skipped; without it a pinned setup must create through worktree.create. */
   reportsSetupTrustMismatch?: boolean
+  createFolderWorkspace?: boolean
 }
 
 export function readAgentLaunchSupport(
@@ -35,6 +37,9 @@ export function readAgentLaunchSupport(
     replay: capabilities.includes(AGENT_LAUNCH_REPLAY_REQUIRED_RUNTIME_CAPABILITY),
     reportsSetupTrustMismatch: capabilities.includes(
       AGENT_LAUNCH_SETUP_TRUST_MISMATCH_RUNTIME_CAPABILITY
+    ),
+    createFolderWorkspace: capabilities.includes(
+      AGENT_LAUNCH_CREATE_FOLDER_WORKSPACE_RUNTIME_CAPABILITY
     )
   }
 }
@@ -58,6 +63,18 @@ export function agentLaunchCreateParams(
     agent,
     ...(operationId ? { operationId } : {}),
     target: { kind: 'create-worktree', create: withoutReservedAgentCreateFields(create) }
+  }
+}
+
+export function agentLaunchFolderCreateParams(
+  agent: TuiAgent,
+  create: RpcSendParams<'folderWorkspace.create'>,
+  operationId?: string | null
+): RpcSendParams<'agent.launch'> {
+  return {
+    agent,
+    ...(operationId ? { operationId } : {}),
+    target: { kind: 'create-folder-workspace', create }
   }
 }
 
