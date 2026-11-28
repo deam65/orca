@@ -4,6 +4,7 @@ import { MOBILE_BROWSER_FRAME_MIN_INTERVAL_MS } from './browser-screencast-reque
 import type { FrameLayer } from './mobile-browser-frame-state'
 import { createBrowserFrameDataUri } from './browser-frame-data-uri'
 import {
+  isDirectWebImageElement,
   updateBrowserImageSource,
   updateBrowserLayerVisibility,
   whenBrowserFrameDisplayable
@@ -54,20 +55,26 @@ export function createBrowserFramePacer(deps: BrowserFramePacerDeps) {
       return
     }
     layers[layer] = { uri, status: 'loading' }
-    updateBrowserImageSource(images[layer], uri)
-    awaitDecode(layer, uri)
+    if (images[layer] !== null) {
+      updateBrowserImageSource(images[layer], uri)
+      awaitDecode(layer, uri)
+    }
   }
 
   // Why: a web `background-image` write fires no load event; native answers through onLoad.
   function awaitDecode(layer: FrameLayer, uri: string): void {
-    whenBrowserFrameDisplayable(uri, {
-      onDisplayable: () => settle(layer, uri),
-      onUndecodable: () => {
-        if (layers[layer].uri === uri) {
-          fail(layer)
+    whenBrowserFrameDisplayable(
+      uri,
+      {
+        onDisplayable: () => settle(layer, uri),
+        onUndecodable: () => {
+          if (layers[layer].uri === uri) {
+            fail(layer, uri)
+          }
         }
-      }
-    })
+      },
+      images[layer]
+    )
   }
 
   function flip(layer: FrameLayer, shown: ShownBrowserFrame): void {
@@ -88,7 +95,10 @@ export function createBrowserFramePacer(deps: BrowserFramePacerDeps) {
     drain()
   }
 
-  function fail(layer: FrameLayer): void {
+  function fail(layer: FrameLayer, uri?: string): void {
+    if (uri !== undefined && layers[layer].uri !== uri) {
+      return
+    }
     layers[layer].status = 'failed'
     if (target?.uri === layers[layer].uri) {
       target = null
@@ -181,8 +191,15 @@ export function createBrowserFramePacer(deps: BrowserFramePacerDeps) {
         if (image === null || mountedUri === null) {
           return
         }
-        // A fresh Image loads the source it mounted with; put back the one this layer held.
         const held = layers[layer].uri
+        if (isDirectWebImageElement(image)) {
+          const targetUri = held ?? mountedUri
+          layers[layer] = { uri: targetUri, status: 'loading' }
+          updateBrowserImageSource(image, targetUri)
+          awaitDecode(layer, targetUri)
+          return
+        }
+        // A fresh Image loads the source it mounted with; put back the one this layer held.
         layers[layer] = { uri: mountedUri, status: 'loading' }
         awaitDecode(layer, mountedUri)
         if (held !== null) {

@@ -9,6 +9,7 @@ import type { BridgeAppFrame } from '../bridge/page-lifecycle/bridge-app-resumed
 export class BridgePageReaders {
   storageKeys: readonly string[] | null
   connectionPathFrames: boolean
+  screencastFrameUrls: boolean
   appInactiveFrames: boolean
   appResumedFrames: boolean
   private itemLinks: boolean | undefined
@@ -20,6 +21,7 @@ export class BridgePageReaders {
   ) {
     this.storageKeys = previous?.storageKeys ?? null
     this.connectionPathFrames = previous?.connectionPathFrames === true
+    this.screencastFrameUrls = previous?.screencastFrameUrls === true
     this.appInactiveFrames = previous?.appInactiveFrames === true
     this.appResumedFrames = previous?.appResumedFrames === true
     this.itemLinks = established ? previous?.botItemLinks === true : undefined
@@ -28,6 +30,7 @@ export class BridgePageReaders {
   ready(message: Extract<BridgeClientMessage, { type: 'ready' }>): void {
     this.storageKeys = message.storageKeys ?? null
     this.connectionPathFrames = message.connectionPathFrames === true
+    this.screencastFrameUrls = message.screencastFrameUrls === true
     this.appInactiveFrames = message.appInactiveFrames === true
     this.appResumedFrames = message.appResumedFrames === true
     this.itemLinks = message.botItemLinks === true
@@ -55,6 +58,7 @@ export class BridgePageReaders {
     return {
       ...(this.storageKeys === null ? {} : { storageKeys: this.storageKeys }),
       ...(this.connectionPathFrames ? { connectionPathFrames: true as const } : {}),
+      ...(this.screencastFrameUrls ? { screencastFrameUrls: true as const } : {}),
       ...(this.appInactiveFrames ? { appInactiveFrames: true as const } : {}),
       ...(this.appResumedFrames ? { appResumedFrames: true as const } : {}),
       ...(this.itemLinks ? { botItemLinks: true as const } : {})

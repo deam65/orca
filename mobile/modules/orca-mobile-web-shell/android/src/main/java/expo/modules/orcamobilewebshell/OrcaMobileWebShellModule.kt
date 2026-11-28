@@ -71,6 +71,21 @@ class OrcaMobileWebShellModule : Module() {
     }
 
     // Lets isolation-unavailable name the WebView to update.
+    Function("supportsScreencastFrames") { true }
+
+    Function("stageScreencastFrame") {
+      sessionId: String,
+      streamId: String,
+      frameSeq: Int,
+      mimeType: String,
+      bytes: ByteArray ->
+      MobileWebShellScreencastSessionRegistry.stage(sessionId, streamId, frameSeq, mimeType, bytes)
+    }
+
+    Function("clearScreencastFrames") { sessionId: String, streamId: String? ->
+      MobileWebShellScreencastSessionRegistry.clear(sessionId, streamId)
+    }
+
     Function("currentWebViewProvider") {
       val context = appContext.reactContext ?: return@Function null
       val info = WebViewCompat.getCurrentWebViewPackage(context) ?: return@Function null

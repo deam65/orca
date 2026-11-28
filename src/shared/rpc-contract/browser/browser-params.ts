@@ -298,7 +298,9 @@ export const MouseWheel = ExpectUrlBrowserTarget.extend({
   dy: z.custom<number>((v) => typeof v === 'number', {
     message: 'Missing required --dy'
   }),
-  dx: OptionalFiniteNumber
+  dx: OptionalFiniteNumber,
+  x: OptionalFiniteNumber,
+  y: OptionalFiniteNumber
 })
 
 export const SetDevice = BrowserTarget.extend({

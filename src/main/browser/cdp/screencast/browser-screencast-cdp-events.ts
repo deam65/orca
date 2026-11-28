@@ -74,6 +74,10 @@ type BrowserScreencastFrameHandlerDeps = {
   bumpSnapshotGeneration: () => void
   /** True while guest frames must be dropped pending re-emulation. */
   observeGuestViewSize: (metadata: BrowserScreencastFrameMetadata) => boolean
+  /** True once this lane uses shrunk CDP frames solely as damage pings for cropped capturePage. */
+  isDamageOnlyScreencast?: () => boolean
+  /** Captures and ACKs an embedder-sized guest's emulated viewport immediately on live damage. */
+  captureCroppedLiveFrame?: (metadata: BrowserScreencastFrameMetadata, sessionId: number) => boolean
 }
 
 export function createBrowserScreencastFrameHandler(
@@ -82,7 +86,7 @@ export function createBrowserScreencastFrameHandler(
   const { options, isClosed, isStopping, queueFrame, ackScreencastFrame } = deps
   const { scheduleNavigationFrameCapture, clearNavigationCaptureTimer, bumpSnapshotGeneration } =
     deps
-  const { observeGuestViewSize } = deps
+  const { observeGuestViewSize, isDamageOnlyScreencast, captureCroppedLiveFrame } = deps
 
   return (params: unknown): void => {
     if (isClosed()) {
@@ -108,11 +112,20 @@ export function createBrowserScreencastFrameHandler(
         ackScreencastFrame(sessionId)
         return
       }
+      if (isDamageOnlyScreencast?.()) {
+        if (!captureCroppedLiveFrame?.(metadata, sessionId)) {
+          ackScreencastFrame(sessionId)
+        }
+        return
+      }
       const decoded = Buffer.from(data, 'base64')
       const image =
         decoded.buffer.byteLength === decoded.byteLength ? decoded : new Uint8Array(decoded)
       const imageSize = readBrowserScreencastImageSize(image, options.format)
       if (!isLiveFrameCompatibleWithViewport(imageSize, options)) {
+        if (captureCroppedLiveFrame?.(metadata, sessionId)) {
+          return
+        }
         // Tab switches and navigation can briefly stream the host surface instead of the client viewport.
         ackScreencastFrame(sessionId)
         scheduleNavigationFrameCapture('viewport-recovery')

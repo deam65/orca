@@ -38,6 +38,8 @@ type PointerRoute = {
 }
 
 const PAGE_ROUTE: PointerRoute = { frameIds: [], sessions: [], frames: [] }
+const WHEEL_ROUTE_CACHE_MS = 250
+const wheelRouteByGuest = new WeakMap<WebContents, { at: number; route: PointerRoute }>()
 // Same bound as focused-frame key routing; deeper frames fall back to their parent.
 const MAX_FRAME_DEPTH = 6
 // A press keeps its frame until release, as Chromium's mouse capture does for a drag.
@@ -266,7 +268,23 @@ export async function sendOffscreenPagePointerInput(
       : null
   let route = captured
     ? await remapCapturedRoute(webContents, send, captured)
-    : await resolvePointerRoute(webContents, send, point, { pressing: type === 'mousePressed' })
+    : (() => {
+        if (type === 'mouseWheel' && !captured) {
+          const cached = wheelRouteByGuest.get(webContents)
+          if (cached && Date.now() - cached.at < WHEEL_ROUTE_CACHE_MS) {
+            return cached.route
+          }
+        }
+        return null
+      })()
+  if (!route) {
+    route = await resolvePointerRoute(webContents, send, point, {
+      pressing: type === 'mousePressed'
+    })
+    if (type === 'mouseWheel' && !captured) {
+      wheelRouteByGuest.set(webContents, { at: Date.now(), route })
+    }
+  }
   let result: unknown
   try {
     result = await sendToRoute(webContents, send, route, params, point)
@@ -280,6 +298,7 @@ export async function sendOffscreenPagePointerInput(
       forgetFrameSession(webContents, dead)
     }
     hoveredRouteByGuest.delete(webContents)
+    wheelRouteByGuest.delete(webContents)
     // A captured drag reattaches to its own frames rather than whatever is under the pointer now.
     route = captured
       ? await remapCapturedRoute(
@@ -288,7 +307,13 @@ export async function sendOffscreenPagePointerInput(
           await reattachRoute(webContents, send, captured)
         )
       : await resolvePointerRoute(webContents, send, point, { pressing: type === 'mousePressed' })
+    if (type === 'mouseWheel' && !captured) {
+      wheelRouteByGuest.set(webContents, { at: Date.now(), route })
+    }
     result = await sendToRoute(webContents, send, route, params, point)
+  }
+  if (type === 'mousePressed' || type === 'mouseReleased') {
+    wheelRouteByGuest.delete(webContents)
   }
   // Only delivered input moves the capture: a refused release keeps it for cleanup's release.
   if (type === 'mouseReleased' && !isButtonHeld(params)) {

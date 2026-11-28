@@ -2,3 +2,7 @@
 export function useBrowserBinaryScreencastGrant(): boolean {
   return true
 }
+
+export function useBrowserScreencastFrameUrlGrant(): boolean {
+  return false
+}

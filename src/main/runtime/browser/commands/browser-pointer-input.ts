@@ -29,7 +29,9 @@ export class RuntimeBrowserPointerInput {
   async browserMouseMove(
     params: { x: number; y: number } & BrowserCommandTargetParams
   ): Promise<unknown> {
-    const target = await this.targets.resolveBrowserCommandTarget(params)
+    const target = await this.targets.resolveBrowserCommandTarget(params, {
+      waitForFirstLoad: false
+    })
     return this.targets
       .requireAgentBrowserBridge()
       .mouseMove(params.x, params.y, target.worktreeId, target.browserPageId)
@@ -101,11 +103,21 @@ export class RuntimeBrowserPointerInput {
     params: {
       dy: number
       dx?: number
+      x?: number
+      y?: number
     } & BrowserCommandTargetParams
   ): Promise<unknown> {
-    const target = await this.targets.resolveBrowserCommandTarget(params)
+    const target = await this.targets.resolveBrowserCommandTarget(params, {
+      waitForFirstLoad: false
+    })
     return this.targets
       .requireAgentBrowserBridge()
-      .mouseWheel(params.dy, params.dx, target.worktreeId, target.browserPageId)
+      .mouseWheel(
+        params.dy,
+        params.dx,
+        target.worktreeId,
+        target.browserPageId,
+        params.x !== undefined && params.y !== undefined ? { x: params.x, y: params.y } : undefined
+      )
   }
 }

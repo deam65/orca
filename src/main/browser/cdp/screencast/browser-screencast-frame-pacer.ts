@@ -82,11 +82,15 @@ export function createBrowserScreencastFramePacer(
       if (isClosed() || isStopping() || !latest) {
         return
       }
-      if (emitFrame(latest)) {
+      try {
+        if (emitFrame(latest)) {
+          ackScreencastFrame(latest.sessionId)
+        } else {
+          pendingFrame = latest
+          schedulePendingFrameRetry()
+        }
+      } catch {
         ackScreencastFrame(latest.sessionId)
-      } else {
-        pendingFrame = latest
-        schedulePendingFrameRetry()
       }
     }, BACKPRESSURE_RETRY_MS)
   }
@@ -128,11 +132,15 @@ export function createBrowserScreencastFramePacer(
         if (isClosed() || isStopping() || !latest) {
           return
         }
-        if (emitFrame(latest)) {
+        try {
+          if (emitFrame(latest)) {
+            ackScreencastFrame(latest.sessionId)
+          } else {
+            pendingFrame = latest
+            schedulePendingFrameRetry()
+          }
+        } catch {
           ackScreencastFrame(latest.sessionId)
-        } else {
-          pendingFrame = latest
-          schedulePendingFrameRetry()
         }
       },
       Math.max(0, options.minFrameIntervalMs - elapsed)

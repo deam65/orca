@@ -10,36 +10,30 @@ export type BridgeBinaryEvent = Extract<
   { binary: unknown }
 >['binary']
 
+const EMPTY_IMAGE = new Uint8Array(0)
+
 export function decodeBridgeScreencastFrame(
   event: BridgeBinaryEvent
 ): BrowserScreencastFrame | null {
-  const image = decodeBase64(event.b64)
-  if (image === null) {
+  if ('frameUrl' in event) {
+    return {
+      opcode: BrowserScreencastOpcode.Frame,
+      seq: event.frameSeq,
+      format: event.format,
+      metadata: event.metadata,
+      image: EMPTY_IMAGE,
+      frameUrl: event.frameUrl
+    }
+  }
+  if (!event.b64 || typeof event.b64 !== 'string') {
     return null
   }
   return {
     opcode: BrowserScreencastOpcode.Frame,
-    // Use screencast frameSeq; bridge seq belongs to acknowledgement/backpressure and would renumber reported images.
     seq: event.frameSeq,
     format: event.format,
     metadata: event.metadata,
-    image,
-    // Retain received base64 for data URIs instead of re-encoding the decoded image.
+    image: EMPTY_IMAGE,
     b64: event.b64
   }
-}
-
-// Use atob like existing mobile E2EE paths; Metro supplies no Buffer.
-function decodeBase64(value: string): Uint8Array | null {
-  let binary: string
-  try {
-    binary = atob(value)
-  } catch {
-    return null
-  }
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index)
-  }
-  return bytes
 }

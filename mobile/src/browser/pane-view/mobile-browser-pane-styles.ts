@@ -1,7 +1,10 @@
-import { StyleSheet } from 'react-native'
+import { Platform, StyleSheet, type ViewStyle } from 'react-native'
 import { TEXT_INPUT_FONT_SIZE } from '../../platform/text-input/text-input-font-size'
 import { colors, radii, spacing, typography } from '../../theme/mobile-theme'
 import { themedStyleSheet } from '../../theme/themed-styles'
+
+// oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: RN Web forwards CSS touchAction and userSelect on ViewStyle; native ignores this branch.
+const WEB_VIEWPORT_TOUCH_STYLE = { touchAction: 'none', userSelect: 'none' } as ViewStyle
 
 export const mobileBrowserPaneStyles = themedStyleSheet(() => ({
   root: {
@@ -24,7 +27,8 @@ export const mobileBrowserPaneStyles = themedStyleSheet(() => ({
     flex: 1,
     minHeight: 0,
     overflow: 'hidden',
-    backgroundColor: colors.bgBase
+    backgroundColor: colors.bgBase,
+    ...(Platform.OS === 'web' ? WEB_VIEWPORT_TOUCH_STYLE : {})
   },
   browserImageHost: {
     ...StyleSheet.absoluteFill,

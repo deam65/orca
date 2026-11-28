@@ -1,7 +1,6 @@
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   Text,
   View,
@@ -10,6 +9,7 @@ import {
   type ViewStyle,
   type HostInstance
 } from 'react-native'
+import { MobileBrowserFrameLayerImage } from './MobileBrowserFrameLayerImage'
 import { ArrowUp, ChevronLeft, ChevronRight, RefreshCw, X } from 'lucide-react-native'
 import { useMobileTranslation } from '../../i18n/use-mobile-translation'
 import { colors, pressedStyle } from '../../theme/mobile-theme'
@@ -245,11 +245,10 @@ export function MobileBrowserPaneView(props: MobileBrowserPaneViewProps) {
                       pointerEvents="none"
                       style={FRAME_LAYER_STYLES[layer]}
                     >
-                      <Image
-                        ref={frameLayers[layer].attachImage}
+                      <MobileBrowserFrameLayerImage
+                        attachImage={frameLayers[layer].attachImage}
                         source={renderedFrameSource}
                         resizeMode="stretch"
-                        fadeDuration={0}
                         onLoad={frameLayers[layer].onLoad}
                         onError={frameLayers[layer].onError}
                         style={[
@@ -272,11 +271,10 @@ export function MobileBrowserPaneView(props: MobileBrowserPaneViewProps) {
                   pointerEvents="none"
                   style={FRAME_LAYER_STYLES[layer]}
                 >
-                  <Image
-                    ref={frameLayers[layer].attachImage}
+                  <MobileBrowserFrameLayerImage
+                    attachImage={frameLayers[layer].attachImage}
                     source={renderedFrameSource}
                     resizeMode="contain"
-                    fadeDuration={0}
                     onLoad={frameLayers[layer].onLoad}
                     onError={frameLayers[layer].onError}
                     style={styles.browserImageFill}

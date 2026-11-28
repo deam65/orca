@@ -1,9 +1,9 @@
 // Frames a phone may have in flight before it acks one. Three cover ~100ms RTT at 30fps without stalling.
-const BASE_WINDOW_FRAMES = 3
+const BASE_WINDOW_FRAMES = 4
 // A backstop only: the queue-delay test bounds buffering. 16 keeps 10 fps up to a 1.6 s round trip.
 const MAX_WINDOW_FRAMES = 16
 // Beyond the base window, a frame goes out only while the link has queued less than this.
-const QUEUE_DELAY_ALLOWANCE_MS = 100
+const QUEUE_DELAY_ALLOWANCE_MS = 150
 // The shell drops oversize frames unannounced; probe with one frame, backing off, when acks stop.
 const STALL_PROBE_MS = 2_000
 const STALL_PROBE_MAX_MS = 8_000

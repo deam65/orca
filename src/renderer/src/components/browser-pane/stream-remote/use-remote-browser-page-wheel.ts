@@ -54,6 +54,7 @@ export function useRemoteBrowserPageWheel({
   /** Null when the host can't zoom, so zoom gestures scroll as they always did there. */
   requestZoom: ((direction: BrowserPageZoomDirection, gesture?: 'key' | 'wheel') => void) | null
 }): void {
+  const lastWheeledRef = useRef<{ pageId: string; x: number; y: number } | null>(null)
   const sendWheel = async (wheel: PendingRemoteBrowserWheel): Promise<void> => {
     const { target, pageId, operationToken, point, dx, dy } = wheel
     if (!isCurrentRemoteOperationToken(operationToken)) {
@@ -61,20 +62,30 @@ export function useRemoteBrowserPageWheel({
     }
     const params = { worktree: runtimeWorktree, page: pageId }
     try {
-      await callRuntimeRpc(
-        target,
-        'browser.mouseMove',
-        { ...params, x: point.x, y: point.y },
-        { timeoutMs: 15_000, suppressFeatureInteraction: true }
-      )
+      const lastWheeled = lastWheeledRef.current
+      const needsMove =
+        !lastWheeled ||
+        lastWheeled.pageId !== pageId ||
+        lastWheeled.x !== point.x ||
+        lastWheeled.y !== point.y
+      if (needsMove) {
+        lastWheeledRef.current = { pageId, x: point.x, y: point.y }
+        void callRuntimeRpc(
+          target,
+          'browser.mouseMove',
+          { ...params, x: point.x, y: point.y },
+          { timeoutMs: 15_000, suppressFeatureInteraction: true }
+        ).catch(() => {})
+      }
       await callRuntimeRpc(
         target,
         'browser.mouseWheel',
-        { ...params, dx, dy },
+        { ...params, dx, dy, x: point.x, y: point.y },
         { timeoutMs: 15_000, suppressFeatureInteraction: true }
       )
       scheduleRemoteTabInfoRefresh(operationToken, 400)
     } catch (error) {
+      lastWheeledRef.current = null
       if (isCurrentRemoteOperationToken(operationToken)) {
         if (isRemoteBrowserPageMissingError(error)) {
           closeMissingRemotePage(pageId)

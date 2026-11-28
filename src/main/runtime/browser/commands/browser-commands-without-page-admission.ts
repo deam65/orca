@@ -19,6 +19,9 @@ export const BROWSER_COMMANDS_WITHOUT_PAGE_ADMISSION: ReadonlySet<string> = new 
   'browserReadImage',
   // A playing page may still be loading; mute must reach it then too.
   'browserSetAudioMuted',
+  // Pointer moves and wheel scrolls act on the painted viewport immediately without waiting for slow subresource loads.
+  'browserMouseMove',
+  'browserMouseWheel',
   'browserTabList',
   'browserTabCurrent',
   'browserTabAnnotations',

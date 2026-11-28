@@ -104,9 +104,7 @@ export class RuntimeRpcWebSocketDispatch extends RuntimeRpcMobileDevices {
           deviceToken: socket.device.clientId,
           clientCapabilities: () => socket.clientCapabilities,
           reply,
-          sendBinary: (bytes) => {
-            sendBinary(bytes)
-          }
+          sendBinary: (bytes, options) => sendBinary(bytes, options)
         },
         target.environmentId,
         request,

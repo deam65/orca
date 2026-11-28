@@ -36,6 +36,10 @@ export const BRIDGE_SESSION_PANE_RETURN_GRANT = 'sessionPaneReturn'
 export const BRIDGE_CHAT_VISUAL_FRAME_GRANT = 'chatVisualFrame'
 
 // Granted to every page this shell opens, whatever its route declares.
+export const BRIDGE_SCREENCAST_FRAME_URL_GRANT = 'screencastFrameUrl'
+export const BRIDGE_SCREENCAST_FRAME_URL_PATTERN =
+  /^\/__orca_screencast\/[A-Za-z0-9_-]{22}\/\d{1,10}$/
+
 export const BRIDGE_SHELL_GRANTS: readonly string[] = [
   BRIDGE_FAULT_GRANT,
   BRIDGE_RPC_ENVELOPE_GRANT,

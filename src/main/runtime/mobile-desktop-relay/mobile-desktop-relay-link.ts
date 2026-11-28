@@ -11,6 +11,7 @@ import {
 } from '../../../shared/remote-runtime/recipe-vm-wake'
 import type { MobileDesktopRelayHost, MobileDesktopRelayHosts } from './mobile-desktop-relay-hosts'
 import { RelayedPhoneReplies } from './relayed-phone-frames'
+import type { RpcBinarySender } from '../rpc/transports/rpc-binary-sender'
 
 export type OpenedRelayLink = {
   socket: RemoteRuntimePassthroughSocket
@@ -24,7 +25,7 @@ export type RelayedPhone = {
   deviceToken: string
   clientCapabilities: () => readonly RuntimeCapability[]
   reply: (frame: string) => void
-  sendBinary: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
+  sendBinary: RpcBinarySender
 }
 
 export class RelayLink {

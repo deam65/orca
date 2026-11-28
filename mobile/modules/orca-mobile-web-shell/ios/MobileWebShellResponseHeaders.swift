@@ -5,10 +5,13 @@ enum MobileWebShellResponseHeaders {
     contentType: String,
     byteCount: Int
   ) -> [String: String] {
+    let cacheControl = path.hasPrefix("/__orca_screencast/")
+      ? "private, max-age=60, immutable"
+      : "no-store"
     var headers = [
       "Content-Type": contentType,
       "Content-Length": String(byteCount),
-      "Cache-Control": "no-store",
+      "Cache-Control": cacheControl,
       "X-Content-Type-Options": "nosniff"
     ]
     if path == "/" {

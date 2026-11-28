@@ -65,7 +65,7 @@ export function peekCachedBrowserFrame(cacheKey: string | null): BrowserFrameCac
 }
 
 export function cacheBrowserFrame(cacheKey: string | null, entry: BrowserFrameCacheEntry): void {
-  if (!cacheKey) {
+  if (!cacheKey || !entry.uri.startsWith('data:')) {
     return
   }
   browserFrameCache.delete(cacheKey)

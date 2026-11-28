@@ -21,6 +21,10 @@ export function updateBrowserLayerVisibility(
 }
 
 export function updateBrowserImageSource(image: ImageInstance | null, uri: string): void {
+  if (image instanceof HTMLImageElement) {
+    image.src = uri
+    return
+  }
   const host = elementOf(image)
   if (host === null) {
     return
@@ -32,11 +36,23 @@ export function updateBrowserImageSource(image: ImageInstance | null, uri: strin
   target.style.backgroundImage = `url("${uri}")`
 }
 
-// Await shared-cache image decode before showing hidden layer: background writes emit no load event and would strand first frame.
+export function isDirectWebImageElement(image: ImageInstance | null): boolean {
+  return image instanceof HTMLImageElement
+}
+
+// Await decode directly on the rendered <img> when available (single fetch/decode); fall back to probe for RNW background-image.
 export function whenBrowserFrameDisplayable(
   uri: string,
-  handlers: BrowserFrameDisplayHandlers
+  handlers: BrowserFrameDisplayHandlers,
+  image?: ImageInstance | null
 ): void {
+  if (image instanceof HTMLImageElement) {
+    if (image.getAttribute('src') !== uri) {
+      image.src = uri
+    }
+    image.decode().then(handlers.onDisplayable, handlers.onUndecodable)
+    return
+  }
   const probe = new window.Image()
   probe.src = uri
   probe.decode().then(handlers.onDisplayable, handlers.onUndecodable)

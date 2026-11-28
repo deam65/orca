@@ -21,7 +21,7 @@ export function normalizeScreencastFrameBudget(
   return {
     quality: clampInteger(params.quality, 10, 100, 70),
     maxWidth: clampInteger(params.maxWidth, 320, 3840, 1440),
-    maxHeight: clampInteger(params.maxHeight, 240, 2160, 1200),
+    maxHeight: clampInteger(params.maxHeight, 240, 3840, 1200),
     everyNthFrame: clampInteger(params.everyNthFrame, 1, 10, 2),
     minFrameIntervalMs: clampInteger(params.minFrameIntervalMs, 0, 1000, 0)
   }

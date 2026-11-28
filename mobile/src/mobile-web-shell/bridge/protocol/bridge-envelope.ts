@@ -22,7 +22,13 @@ import {
   BridgeTerminalKeyIdSchema,
   BridgeTerminalKeyRailSchema
 } from '../native-capabilities/bridge-terminal-key'
-import { BRIDGE_ID_PATTERN, idSchema, methodSchema, versionSchema } from './bridge-frame-fields'
+import {
+  BRIDGE_ID_PATTERN,
+  BRIDGE_SCREENCAST_FRAME_URL_PATTERN,
+  idSchema,
+  methodSchema,
+  versionSchema
+} from './bridge-frame-fields'
 
 import {
   isPageStorageKey,
@@ -137,6 +143,8 @@ const BridgeClientMessageSchema = z.discriminatedUnion('type', [
       .catch(undefined),
     // Pages that read `connectionPath` frames say so; older pages never receive one.
     connectionPathFrames: z.literal(true).optional().catch(undefined),
+    // Pages that read `screencastFrameUrls` frames say so; older pages never receive one.
+    screencastFrameUrls: z.literal(true).optional().catch(undefined),
     // Pages that read `appInactive` frames say so; older pages never receive one.
     appInactiveFrames: z.literal(true).optional().catch(undefined),
     // Pages that read `appResumed` frames, and answer each with `swapSafe`, say so.
@@ -179,6 +187,12 @@ const BridgeClientMessageSchema = z.discriminatedUnion('type', [
 
 export type BridgeClientMessage = z.infer<typeof BridgeClientMessageSchema>
 
+const screencastBinaryBase = {
+  format: z.enum(BRIDGE_BINARY_FORMATS),
+  frameSeq: z.number().int().nonnegative(),
+  metadata: screencastMetadataSchema
+}
+
 // reply/event each have multiple shapes under type, so use a union rather than a discriminator; try hot frames first.
 const BridgeHostMessageSchema = z.union([
   z.object({
@@ -193,13 +207,14 @@ const BridgeHostMessageSchema = z.union([
     type: z.literal('event'),
     id: idSchema,
     seq: z.number().int().nonnegative(),
-    // Carry decoded-frame metadata alongside base64. Keep bridge seq separate from screencast frameSeq: only the former drives backpressure.
-    binary: z.object({
-      b64: z.string(),
-      format: z.enum(BRIDGE_BINARY_FORMATS),
-      frameSeq: z.number().int().nonnegative(),
-      metadata: screencastMetadataSchema
-    })
+    // Carry decoded-frame metadata alongside base64 or frameUrl. Keep bridge seq separate from screencast frameSeq: only the former drives backpressure.
+    binary: z.union([
+      z.object({ b64: z.string(), ...screencastBinaryBase }),
+      z.object({
+        frameUrl: z.string().regex(BRIDGE_SCREENCAST_FRAME_URL_PATTERN),
+        ...screencastBinaryBase
+      })
+    ])
   }),
   z.object({
     v: versionSchema,

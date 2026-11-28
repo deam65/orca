@@ -22,8 +22,13 @@ export function updateBrowserImageSource(image: ImageInstance | null, uri: strin
   image?.setNativeProps({ source, src: source })
 }
 
+export function isDirectWebImageElement(_image: ImageInstance | null): boolean {
+  return false
+}
+
 // Native Image onLoad/onError already settle layer flip; web background-image writes need an explicit decode probe instead.
 export function whenBrowserFrameDisplayable(
   _uri: string,
-  _handlers: BrowserFrameDisplayHandlers
+  _handlers: BrowserFrameDisplayHandlers,
+  _image?: ImageInstance | null
 ): void {}

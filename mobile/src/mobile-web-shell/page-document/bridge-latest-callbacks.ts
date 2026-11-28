@@ -1,3 +1,9 @@
+import {
+  clearScreencastFrames,
+  stageScreencastFrame,
+  supportsScreencastFrames,
+  type OrcaMobileWebShellViewHandle
+} from '../../../modules/orca-mobile-web-shell/src/index'
 import type { BridgeHostOptions } from '../host-bridge/bridge-host-contract'
 import type { MobileWebShellBridgeArgs } from './use-mobile-web-shell-bridge'
 
@@ -23,4 +29,28 @@ export function latestBridgeCallbacks(args: { readonly current: MobileWebShellBr
     onTerminalKeyRailClaim: (claimed, inputOwner, toolbar) =>
       args.current.onTerminalKeyRailClaim(claimed, inputOwner, toolbar)
   } satisfies Partial<BridgeHostOptions>
+}
+
+export function screencastFrameCallbacks(
+  sessionId: string,
+  viewRef: { readonly current: { sessionId: string; handle: OrcaMobileWebShellViewHandle } | null }
+): Partial<Pick<BridgeHostOptions, 'stageScreencastFrame' | 'clearScreencastFrames'>> {
+  if (!supportsScreencastFrames()) {
+    return {}
+  }
+  return {
+    stageScreencastFrame: (streamId, frameSeq, mimeType, data) => {
+      const mounted = viewRef.current
+      if (mounted === null || mounted.sessionId !== sessionId) {
+        return null
+      }
+      return stageScreencastFrame(sessionId, streamId, frameSeq, mimeType, data)
+    },
+    clearScreencastFrames: (streamId) => {
+      const mounted = viewRef.current
+      if (mounted !== null && mounted.sessionId === sessionId) {
+        clearScreencastFrames(sessionId, streamId)
+      }
+    }
+  }
 }

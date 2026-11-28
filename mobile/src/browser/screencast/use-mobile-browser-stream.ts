@@ -25,18 +25,19 @@ import {
   type BrowserDialogState,
   type ScreencastEvent
 } from './mobile-browser-stream-events'
+import { createBrowserScreencastAckSender } from './browser-screencast-ack-sender'
 import { createBrowserFramePacer } from './browser-frame-pacer'
 import { useMobileBrowserRequest } from '../page-interaction/use-mobile-browser-request'
 
 type MobileBrowserStreamArgs = {
   binaryScreencastGranted: boolean
+  screencastFrameUrlGranted?: boolean
   browserViewMode: MobileBrowserViewMode
   busyRef: { current: boolean }
   cacheKey: string | null
   client: RpcClient | null
   frameMetadata: BrowserScreencastFrameMetadata | null
   frameMetadataRef: { current: BrowserScreencastFrameMetadata | null }
-  /** Null while the app is away; each return to the foreground is a new value. */
   foregroundVisit: number | null
   initialFrameUri: string | null
   lastStreamCacheKeyRef: { current: string | null }
@@ -47,9 +48,7 @@ type MobileBrowserStreamArgs = {
   setAddressValue: Dispatch<SetStateAction<string>>
   setBusy: Dispatch<SetStateAction<boolean>>
   setDialog: Dispatch<SetStateAction<BrowserDialogState | null>>
-  /** The host streams page prompts and relays their answers (browser.page-prompts.v1). */
   pagePromptsSupported: boolean
-  /** Takes the stream's prompt and download events; true when it handled one. */
   handlePageEvent: (payload: unknown) => boolean
   clearPagePrompt: () => void
   setError: Dispatch<SetStateAction<string | null>>
@@ -64,6 +63,7 @@ type MobileBrowserStreamArgs = {
 export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
   const {
     binaryScreencastGranted,
+    screencastFrameUrlGranted = false,
     browserViewMode,
     busyRef,
     cacheKey,
@@ -102,14 +102,13 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
   })
 
   const [frameUri, setFrameUri] = useState(initialFrameUri)
-  // A stopped stream sends nothing more, so the last frame stays until the person reconnects.
   const [streamStopped, setStreamStopped] = useState<string | null>(null)
   const [reconnectRequest, setReconnectRequest] = useState(0)
+  const [ackSender] = useState(createBrowserScreencastAckSender)
   const [framePacer] = useState(() =>
     createBrowserFramePacer({
       initialUri: initialFrameUri,
       setFrameUri,
-      // Why: at the flip, so touch mapping uses the geometry of the frame on screen.
       onShown: ({ frame, cacheKey: shownCacheKey, uri }) => {
         cacheBrowserFrame(shownCacheKey, { uri, metadata: frame.metadata })
         if (!browserFrameMetadataEqual(frameMetadataRef.current, frame.metadata)) {
@@ -120,13 +119,20 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
           busyRef.current = false
           setBusy(false)
         }
+        ackSender.noteShown(frame.seq)
       }
     })
   )
 
   const streamRequest = useMemo(
-    () => buildMobileBrowserScreencastRequest(layout, PixelRatio.get(), browserViewMode),
-    [browserViewMode, layout]
+    () =>
+      buildMobileBrowserScreencastRequest(
+        layout,
+        PixelRatio.get(),
+        browserViewMode,
+        screencastFrameUrlGranted
+      ),
+    [browserViewMode, layout, screencastFrameUrlGranted]
   )
 
   const frameGeometry = useMemo(
@@ -147,7 +153,6 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
       ) {
         return current
       }
-      // Clamp pan after rotation/layout shrink so zoom state cannot retain invalid previous geometry.
       zoomRef.current = next
       return next
     })
@@ -167,7 +172,6 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
       setFrameMetadata(cachedFrame?.metadata ?? null)
     }
     setDialog(null)
-    // The host replays prompts it still holds to the new stream.
     clearPagePrompt()
     setError(null)
     setStreamStopped(null)
@@ -182,12 +186,10 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
       busyRef.current = false
       setBusy(false)
       if (!binaryScreencastGranted) {
-        // Check app-local limitation before desktop reply; desktop updates cannot change phone build.
         setError(
           translate('browser.stream.updateApp', 'Update the Orca app to stream browser tabs here.')
         )
       } else if (screencastSupported === false) {
-        // Every host new enough to pair streams when it has a browser window, so a refusal means it has none.
         setError(
           translate('browser.stream.hostCannotStream', "This host can't stream browser tabs here.")
         )
@@ -202,7 +204,6 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
     }
     busyRef.current = true
     setBusy(true)
-    // The subscription stays open after the timeout, so a late first frame clears the notice.
     let timedOut = false
     let startupTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
       if (streamGenerationRef.current !== generation) {
@@ -220,8 +221,8 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
       }
     }
     const worktree = `id:${worktreeId}`
-    // Set once `ready` echoes frameAck; hosts that strip the opt-in never get an ack.
-    let ackSubscriptionId: string | null = null
+    ackSender.bind(client, worktree)
+
     const unsubscribe = client.subscribe(
       'browser.screencast',
       {
@@ -238,7 +239,7 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
         }
         const ready = readScreencastReady(payload)
         if (ready) {
-          ackSubscriptionId = ready.frameAck === true ? ready.subscriptionId : null
+          ackSender.setSubscriptionId(ready.frameAck === true ? ready.subscriptionId : null)
         }
         if (handlePageEvent(payload)) {
           return
@@ -265,16 +266,6 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
             timedOut = false
             setStreamStopped(null)
           }
-          if (ackSubscriptionId) {
-            // Cumulative, so a frame the shell dropped is covered by the next one's ack.
-            void client
-              .sendRequest('browser.screencast.ack', {
-                worktree,
-                subscriptionId: ackSubscriptionId,
-                seq: frame.seq
-              })
-              .catch(() => {})
-          }
           if (cacheKey) {
             framePacer.push(frame, cacheKey)
           }
@@ -284,9 +275,11 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
     return () => {
       clearStartupTimer()
       framePacer.reset()
+      ackSender.reset()
       unsubscribe()
     }
   }, [
+    ackSender,
     binaryScreencastGranted,
     clearPagePrompt,
     client,
@@ -303,7 +296,6 @@ export function useMobileBrowserStream(args: MobileBrowserStreamArgs) {
     worktreeId
   ])
 
-  // Why: only mounts the layers; the pacer re-points them natively, which a re-render must not undo.
   const renderedFrameSource = frameUri ? { uri: frameUri } : null
 
   return {

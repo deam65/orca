@@ -44,12 +44,16 @@ export function screencastLaneViewers(
 ): BrowserScreencastLaneViewers {
   const onFrame: BrowserScreencastLaneViewers['onFrame'] = (bytes) => {
     const ghosts: string[] = []
+    let deliveredImmediately = viewers.size === 0
     for (const subscriptionId of viewers) {
       const subscriber = record.subscribers.get(subscriptionId)
       if (!subscriber) {
         continue
       }
       deliverScreencastSubscriberFrame(subscriber, bytes)
+      if (subscriber.pendingFrame === null) {
+        deliveredImmediately = true
+      }
       if (screencastSubscriberIsGhost(subscriber.delivery)) {
         ghosts.push(subscriptionId)
       }
@@ -60,7 +64,7 @@ export function screencastLaneViewers(
         leaveScreencastPage(record, subscriptionId, record.session)
       }
     }
-    return true
+    return deliveredImmediately
   }
   return {
     onFrame,
@@ -128,6 +132,8 @@ export function leaveScreencastPage(
     page.viewportOwnerSubscriptionId = fallback?.[0] ?? null
     if (fallback) {
       void session.updateViewport(fallback[1].viewport).catch(() => {})
+    } else if (page.subscribers.size > 0) {
+      void session.updateViewport({}).catch(() => {})
     }
   }
   if (page.subscribers.size === 0) {

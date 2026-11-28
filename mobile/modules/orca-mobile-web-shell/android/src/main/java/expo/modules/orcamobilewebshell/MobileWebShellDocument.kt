@@ -46,6 +46,8 @@ internal class MobileWebShellDocument(private val context: Context) {
   var sink: MobileWebShellDocumentSink? = null
   private var bridgeInstalled = false
   private val bridgeGate = MobileWebShellBridgeGate()
+  private val screencastFrames = MobileWebShellScreencastFrameStore()
+  private var registeredSessionId: String? = null
   // The page sends ready before native replies; volatile proxy state crosses interceptor/UI threads.
   @Volatile private var replyProxy: JavaScriptReplyProxy? = null
   private var applied: MobileWebShellAppliedProps? = null
@@ -66,6 +68,7 @@ internal class MobileWebShellDocument(private val context: Context) {
     val next = MobileWebShellAppliedProps(generationDirectory, sessionId, bridgeEnabled)
     if (applied?.matches(next) == true) return
     applied = next
+    unregisterSession()
     documentFailed = false
     loadState.reset()
     val view = webView
@@ -99,15 +102,31 @@ internal class MobileWebShellDocument(private val context: Context) {
       failPropUpdate(MobileWebShellFailureReason.ISOLATION_UNAVAILABLE)
       return
     }
+    screencastFrames.clearAll()
+    registerSession(sessionId)
     served = MobileWebShellServed(loaded, host)
     view.visibility = View.VISIBLE
     view.loadUrl("$origin/")
+  }
+
+  private fun registerSession(sessionId: String) {
+    unregisterSession()
+    registeredSessionId = sessionId
+    MobileWebShellScreencastSessionRegistry.register(sessionId, screencastFrames)
+  }
+
+  private fun unregisterSession() {
+    val current = registeredSessionId ?: return
+    registeredSessionId = null
+    MobileWebShellScreencastSessionRegistry.unregister(current, screencastFrames)
   }
 
   /** Retire the old visible generation even when the replacement fails. */
   private fun failPropUpdate(reason: MobileWebShellFailureReason) {
     // Remove the old listener: stopLoading leaves its same-origin document alive and able to rearm replies.
     removeBridgeListener()
+    unregisterSession()
+    screencastFrames.clearAll()
     served = null
     webView?.visibility = View.INVISIBLE
     emit(loadState.failed(reason))
@@ -177,6 +196,18 @@ internal class MobileWebShellDocument(private val context: Context) {
     replyProxy?.postMessage(json)
   }
 
+  fun stageScreencastFrame(streamId: String, frameSeq: Int, mimeType: String, bytes: ByteArray): String? {
+    return screencastFrames.stage(streamId, frameSeq, mimeType, bytes)
+  }
+
+  fun clearScreencastFrames(streamId: String?) {
+    if (streamId != null) {
+      screencastFrames.clearStream(streamId)
+    } else {
+      screencastFrames.clearAll()
+    }
+  }
+
   /** The view's attach and detach: off-window, the page reads hidden, as a buried WKWebView does on iOS. */
   fun resume() {
     webView?.onResume()
@@ -188,6 +219,8 @@ internal class MobileWebShellDocument(private val context: Context) {
 
   /** The view is done with it, or onRenderProcessGone. */
   fun destroyWebView() {
+    unregisterSession()
+    screencastFrames.clearAll()
     val view = webView ?: return
     removeBridgeListener()
     loadState.documentEnded()
@@ -299,6 +332,11 @@ internal class MobileWebShellDocument(private val context: Context) {
       val bytes = MOBILE_WEB_SHELL_CHAT_VISUAL_FRAME_DOCUMENT
       val headers = mobileWebShellResponseHeaders(path, bytes.size)
       return WebResourceResponse("text/html", "utf-8", 200, "OK", headers, ByteArrayInputStream(bytes))
+    }
+    val frameEntry = screencastFrames.read(path)
+    if (frameEntry != null) {
+      val headers = mobileWebShellResponseHeaders(path, frameEntry.bytes.size)
+      return WebResourceResponse(frameEntry.mimeType, null, 200, "OK", headers, ByteArrayInputStream(frameEntry.bytes))
     }
     val asset = current.generation.entries[path] ?: return null
     val bytes = runCatching { asset.file.readBytes() }.getOrNull() ?: return null

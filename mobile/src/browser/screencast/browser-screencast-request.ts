@@ -1,5 +1,6 @@
 import {
   assembleMobileBrowserScreencastRequest,
+  MOBILE_HIGH_DENSITY_DEVICE_SCALE_FACTOR,
   MOBILE_VIEW_DEVICE_SCALE_FACTOR,
   type BrowserStreamLayout,
   type MobileBrowserScreencastRequest,
@@ -10,12 +11,21 @@ import {
 export function buildMobileBrowserScreencastRequest(
   layout: BrowserStreamLayout | null,
   pixelRatio: number,
-  viewMode: MobileBrowserViewMode = 'web'
+  viewMode: MobileBrowserViewMode = 'web',
+  _frameUrlGranted = false
 ): MobileBrowserScreencastRequest | null {
+  const deviceScaleFactor = Math.max(
+    1,
+    Math.min(
+      MOBILE_HIGH_DENSITY_DEVICE_SCALE_FACTOR,
+      Number.isFinite(pixelRatio) ? pixelRatio : MOBILE_VIEW_DEVICE_SCALE_FACTOR
+    )
+  )
   return assembleMobileBrowserScreencastRequest(
     layout,
     pixelRatio,
     viewMode,
-    MOBILE_VIEW_DEVICE_SCALE_FACTOR
+    deviceScaleFactor,
+    true
   )
 }

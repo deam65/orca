@@ -99,6 +99,68 @@ export function currentWebViewProvider(): WebViewProvider | null {
   }
 }
 
+type ScreencastNativeModule = {
+  supportsScreencastFrames?: () => boolean
+  stageScreencastFrame?: (
+    sessionId: string,
+    streamId: string,
+    frameSeq: number,
+    mimeType: 'image/jpeg' | 'image/png',
+    data: Uint8Array
+  ) => string | null
+  clearScreencastFrames?: (sessionId: string, streamId: string | null) => void
+  postBridgeMessageForSession?: (sessionId: string, json: string) => Promise<void>
+}
+
+export function supportsScreencastFrames(): boolean {
+  const shell = requireOptionalNativeModule<ScreencastNativeModule>('OrcaMobileWebShell')
+  try {
+    return (
+      typeof shell?.supportsScreencastFrames === 'function' &&
+      typeof shell?.stageScreencastFrame === 'function' &&
+      shell.supportsScreencastFrames() === true
+    )
+  } catch {
+    return false
+  }
+}
+
+export function stageScreencastFrame(
+  sessionId: string,
+  streamId: string,
+  frameSeq: number,
+  mimeType: 'image/jpeg' | 'image/png',
+  data: Uint8Array
+): string | null {
+  const shell = requireOptionalNativeModule<ScreencastNativeModule>('OrcaMobileWebShell')
+  if (typeof shell?.stageScreencastFrame !== 'function') {
+    return null
+  }
+  try {
+    return shell.stageScreencastFrame(sessionId, streamId, frameSeq, mimeType, data) ?? null
+  } catch {
+    return null
+  }
+}
+
+export function clearScreencastFrames(sessionId: string, streamId: string | null): void {
+  const shell = requireOptionalNativeModule<ScreencastNativeModule>('OrcaMobileWebShell')
+  if (typeof shell?.clearScreencastFrames !== 'function') {
+    return
+  }
+  try {
+    shell.clearScreencastFrames(sessionId, streamId)
+  } catch {}
+}
+
+export function postBridgeMessageForSession(sessionId: string, json: string): Promise<void> | null {
+  const shell = requireOptionalNativeModule<ScreencastNativeModule>('OrcaMobileWebShell')
+  if (typeof shell?.postBridgeMessageForSession !== 'function') {
+    return null
+  }
+  return shell.postBridgeMessageForSession(sessionId, json)
+}
+
 export {
   MOBILE_WEB_SHELL_FAILURE_REASONS,
   parseMobileWebShellLoadState,

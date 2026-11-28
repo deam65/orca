@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { RpcClient } from '../../transport/rpc/rpc-client-contract'
 import type { BrowserScreencastFrameMetadata } from '../screencast/browser-screencast-protocol'
-import { browserPointerMove, browserPointerWheel } from './mobile-browser-command-operations'
+import { browserPointerWheel } from './mobile-browser-command-operations'
 import type { BrowserPageParams } from './use-mobile-browser-request'
 import {
   browserWheelDeltaFromScreen,
@@ -28,11 +28,12 @@ type BrowserWheelQueueArgs = {
   zoomRef: { current: BrowserZoomState }
 }
 
-// Retires queued wheel work with its pane/client so departed owners cannot drain into a live one.
+const MAX_IN_FLIGHT_WHEEL_COMMANDS = 2
+
 export function useMobileBrowserWheelQueue(args: BrowserWheelQueueArgs) {
   const { client, frameMetadataRef, layoutRef, pageParams, setError, zoomRef } = args
   const pendingWheelCommandRef = useRef<PendingWheelCommand | null>(null)
-  const wheelCommandInFlightRef = useRef(false)
+  const inFlightCountRef = useRef(0)
   const commandGenerationRef = useRef(0)
   const commandsMountedRef = useRef(false)
 
@@ -42,12 +43,12 @@ export function useMobileBrowserWheelQueue(args: BrowserWheelQueueArgs) {
       commandsMountedRef.current = false
       commandGenerationRef.current += 1
       pendingWheelCommandRef.current = null
-      wheelCommandInFlightRef.current = false
+      inFlightCountRef.current = 0
     }
   }, [client, pageParams])
 
   const flushPendingWheelCommand = useCallback(() => {
-    if (!commandsMountedRef.current || wheelCommandInFlightRef.current) {
+    if (!commandsMountedRef.current || inFlightCountRef.current >= MAX_IN_FLIGHT_WHEEL_COMMANDS) {
       return
     }
     const pending = pendingWheelCommandRef.current
@@ -55,33 +56,29 @@ export function useMobileBrowserWheelQueue(args: BrowserWheelQueueArgs) {
       return
     }
     pendingWheelCommandRef.current = null
-    wheelCommandInFlightRef.current = true
+    inFlightCountRef.current += 1
     const generation = commandGenerationRef.current
     void (async () => {
       try {
-        const moveReply = await browserPointerMove.request(client, {
-          ...pending.base,
-          x: pending.point.x,
-          y: pending.point.y
-        })
-        browserPointerMove.interpret(moveReply)
         if (generation !== commandGenerationRef.current) {
           return
         }
         const wheelReply = await browserPointerWheel.request(client, {
           ...pending.base,
           dx: pending.dx,
-          dy: pending.dy
+          dy: pending.dy,
+          x: pending.point.x,
+          y: pending.point.y
         })
         browserPointerWheel.interpret(wheelReply)
         if (generation === commandGenerationRef.current) {
           setError(null)
         }
       } catch {
-        // Scroll bursts race navigation; keep usable stream instead of replacing it with transient selector errors.
+        // Scroll bursts race navigation; ignore.
       } finally {
         if (generation === commandGenerationRef.current) {
-          wheelCommandInFlightRef.current = false
+          inFlightCountRef.current = Math.max(0, inFlightCountRef.current - 1)
           flushPendingWheelCommand()
         }
       }

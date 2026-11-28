@@ -10,7 +10,8 @@ import type { MobileBrowserViewMode } from './screencast/browser-screencast-requ
 import type { BrowserPointerModifier } from './pane-view/MobileBrowserPointerModifiers'
 import {
   getInitialMobileBrowserViewMode,
-  saveMobileBrowserViewMode
+  saveMobileBrowserViewMode,
+  subscribeMobileBrowserViewMode
 } from './pane-view/mobile-browser-view-mode-state'
 import type {
   BrowserTouchLayout,
@@ -37,7 +38,10 @@ import { MobileBrowserPaneView } from './pane-view/MobileBrowserPaneView'
 import { useMobileBrowserInteractions } from './page-interaction/use-mobile-browser-interactions'
 import { useMobileBrowserStream } from './screencast/use-mobile-browser-stream'
 import { useMobileBrowserPagePrompts } from './page-interaction/use-mobile-browser-page-prompts'
-import { useBrowserBinaryScreencastGrant } from './screencast/use-browser-binary-screencast-grant'
+import {
+  useBrowserBinaryScreencastGrant,
+  useBrowserScreencastFrameUrlGrant
+} from './screencast/use-browser-binary-screencast-grant'
 import type { MobileBrowserHostSupport } from './mobile-browser-host-support'
 import { useRouteRelaysCapability } from '../worktree/execution-hosts/workspace-server-context'
 import {
@@ -142,7 +146,10 @@ export function MobileBrowserPane({
     [clearLongPressTimer]
   )
 
+  const cancelMomentumRef = useRef<() => void>(() => {})
+
   const cancelPageGesture = useCallback(() => {
+    cancelMomentumRef.current()
     clearLongPressTimer()
     pinchRef.current = null
     panRef.current = null
@@ -204,9 +211,11 @@ export function MobileBrowserPane({
 
   useEffect(() => {
     setBrowserViewMode(getInitialMobileBrowserViewMode(worktreeId, tab.browserPageId, tab.url))
+    return subscribeMobileBrowserViewMode(worktreeId, tab.browserPageId, setBrowserViewMode)
   }, [tab.browserPageId, tab.url, worktreeId])
 
   const binaryScreencastGranted = useBrowserBinaryScreencastGrant()
+  const screencastFrameUrlGranted = useBrowserScreencastFrameUrlGrant()
 
   const {
     frameGeometry,
@@ -218,6 +227,7 @@ export function MobileBrowserPane({
     streamStopped
   } = useMobileBrowserStream({
     binaryScreencastGranted,
+    screencastFrameUrlGranted,
     // A desktop relaying to a server must also forward the answers.
     pagePromptsSupported: hostSupport.pagePrompts && relaysPagePrompts,
     handlePageEvent: pagePrompts.handlePageEvent,
@@ -272,78 +282,72 @@ export function MobileBrowserPane({
     await navigateTo(url)
   }, [addressValue, navigateTo])
 
-  const { panResponder, sendDialogCommand, sendKeyboardText, sendKeypress, togglePointerModifier } =
-    useMobileBrowserInteractions({
-      clearLongPressTimer,
-      client,
-      pageCoveredRef,
-      gestureCancelledRef,
-      frameGeometry,
-      frameMetadataRef,
-      keyboardValue,
-      layoutRef,
-      longPressTimerRef,
-      onToast,
-      pageParams,
-      panRef,
-      pinchRef,
-      pointerModifiers,
-      sendBrowserRequest,
-      scrollingRef,
-      startPointRef,
-      setDialog,
-      setError,
-      setKeyboardValue,
-      setPointerModifiers,
-      setZoom,
-      zoomRef
-    })
+  const {
+    panResponder,
+    cancelMomentum,
+    sendDialogCommand,
+    sendKeyboardText,
+    sendKeypress,
+    togglePointerModifier
+  } = useMobileBrowserInteractions({
+    clearLongPressTimer,
+    client,
+    pageCoveredRef,
+    gestureCancelledRef,
+    frameGeometry,
+    frameMetadataRef,
+    keyboardValue,
+    layoutRef,
+    longPressTimerRef,
+    onToast,
+    pageParams,
+    panRef,
+    pinchRef,
+    pointerModifiers,
+    sendBrowserRequest,
+    scrollingRef,
+    startPointRef,
+    setDialog,
+    setError,
+    setKeyboardValue,
+    setPointerModifiers,
+    setZoom,
+    zoomRef
+  })
+
+  useLayoutEffect(() => {
+    cancelMomentumRef.current = cancelMomentum
+  }, [cancelMomentum])
 
   const controlsDisabled = !client || !tab.browserPageId || screencastSupported !== true
+  const runNavCommand = useCallback(
+    (command: typeof browserReload) => {
+      if (controlsDisabled) {
+        return
+      }
+      void sendBrowserRequest(
+        async (rpc, page, options) => command.interpret(await command.request(rpc, page, options)),
+        { suppressError: true }
+      )
+    },
+    [controlsDisabled, sendBrowserRequest]
+  )
   const goBack = useCallback(() => {
-    if (controlsDisabled || !tab.canGoBack) {
-      return
+    if (tab.canGoBack) {
+      runNavCommand(browserGoBack)
     }
-    void sendBrowserRequest(
-      async (rpc, page, options) =>
-        browserGoBack.interpret(await browserGoBack.request(rpc, page, options)),
-      { suppressError: true }
-    )
-  }, [controlsDisabled, sendBrowserRequest, tab.canGoBack])
+  }, [runNavCommand, tab.canGoBack])
   const goForward = useCallback(() => {
-    if (controlsDisabled || !tab.canGoForward) {
-      return
+    if (tab.canGoForward) {
+      runNavCommand(browserGoForward)
     }
-    void sendBrowserRequest(
-      async (rpc, page, options) =>
-        browserGoForward.interpret(await browserGoForward.request(rpc, page, options)),
-      { suppressError: true }
-    )
-  }, [controlsDisabled, sendBrowserRequest, tab.canGoForward])
-  const reloadPage = useCallback(() => {
-    if (controlsDisabled) {
-      return
-    }
-    void sendBrowserRequest(
-      async (rpc, page, options) =>
-        browserReload.interpret(await browserReload.request(rpc, page, options)),
-      { suppressError: true }
-    )
-  }, [controlsDisabled, sendBrowserRequest])
+  }, [runNavCommand, tab.canGoForward])
+  const reloadPage = useCallback(() => runNavCommand(browserReload), [runNavCommand])
   // As on desktop, the reload button doubles as Stop while the page loads.
   // An older paired desktop relaying to a newer server refuses browser.stop from a phone.
   const stopRelayed = useRouteRelaysCapability(BROWSER_MOBILE_STOP_RUNTIME_CAPABILITY)
   const showStop = hostSupport.stop && stopRelayed && tab.loading
-  const stopPage = useCallback(() => {
-    if (controlsDisabled) {
-      return
-    }
-    void sendBrowserRequest(
-      async (rpc, page, options) =>
-        browserStop.interpret(await browserStop.request(rpc, page, options)),
-      { suppressError: true }
-    )
-  }, [controlsDisabled, sendBrowserRequest])
+  const stopPage = useCallback(() => runNavCommand(browserStop), [runNavCommand])
 
   // As on desktop's streamed pane: reloading the host's error page only refreshes it, so re-attempt the URL that failed.
   const retryFailedLoad = useCallback(() => {

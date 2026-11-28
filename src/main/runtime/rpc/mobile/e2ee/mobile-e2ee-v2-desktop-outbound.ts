@@ -42,7 +42,10 @@ export function createDesktopMobileE2EEV2OutboundQueue(args: {
       if (item.kind === 'text') {
         args.ws.send(args.session.sealText(item.plaintext))
       } else {
-        args.ws.send(Buffer.from(args.session.sealBinary(item.plaintext)), { binary: true })
+        const sealed = args.session.sealBinary(item.plaintext)
+        args.ws.send(Buffer.from(sealed.buffer, sealed.byteOffset, sealed.byteLength), {
+          binary: true
+        })
       }
     },
     byteLengthOf: desktopMobileE2EEV2OutboundItemBytes,

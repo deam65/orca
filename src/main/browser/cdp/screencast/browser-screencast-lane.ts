@@ -6,9 +6,11 @@ import {
 import type { BrowserScreencastFrameMetadata } from '../../../../shared/browser/screencast/browser-screencast-protocol'
 import { runDebuggerCommandWithTimeout } from './browser-screencast-debugger-command'
 import { createBrowserScreencastFrameHandler } from './browser-screencast-cdp-events'
+import { createBrowserScreencastCroppedLiveCapture } from './browser-screencast-cropped-live-capture'
 import { createBrowserScreencastFramePacer } from './browser-screencast-frame-pacer'
 import { createBrowserScreencastMotionQuality } from './browser-screencast-motion-quality'
 import { createBrowserScreencastSnapshotCapture } from './browser-screencast-snapshot-capture'
+import { positiveInteger } from './browser-screencast-viewport-fit'
 import type {
   BrowserScreencastFrameBudget,
   BrowserScreencastLane,
@@ -29,6 +31,7 @@ type BrowserScreencastLaneDeps = {
   enqueue: (work: () => Promise<void>) => Promise<void>
   readZoomFactor: () => number
   applyDeviceMetricsOverride: () => Promise<void>
+  isDeviceMetricsOverridden: () => boolean
   runExclusiveCapture: (capture: () => Promise<void>) => Promise<void>
   observeGuestViewSize: (metadata: BrowserScreencastFrameMetadata) => boolean
   sendPageCommand: GuestSessionCdpSender
@@ -56,6 +59,8 @@ export function createBrowserScreencastLane(
   const { webContents, dbg, cdpSessionId, options, enqueue } = deps
   let stopping = false
   let closed = false
+  // Embedded webviews emit the full host surface under mobile emulation; shrink CDP frames to cheap damage pings.
+  let damageOnlyScreencast = false
   const stopRequested = new AbortController()
   const isClosed = (): boolean => closed || deps.isStreamClosed()
   const isStopping = (): boolean => stopping || deps.isStreamStopping()
@@ -67,13 +72,24 @@ export function createBrowserScreencastLane(
     )
 
   const startScreencast = (): Promise<unknown> =>
-    sendCommand('Page.startScreencast', {
-      format: options.format,
-      quality: options.quality,
-      maxWidth: options.maxWidth,
-      maxHeight: options.maxHeight,
-      everyNthFrame: options.everyNthFrame
-    })
+    sendCommand(
+      'Page.startScreencast',
+      damageOnlyScreencast
+        ? {
+            format: 'jpeg',
+            quality: 10,
+            maxWidth: 320,
+            maxHeight: 240,
+            everyNthFrame: options.everyNthFrame
+          }
+        : {
+            format: options.format,
+            quality: options.quality,
+            maxWidth: options.maxWidth,
+            maxHeight: options.maxHeight,
+            everyNthFrame: options.everyNthFrame
+          }
+    )
 
   const framePacer = createBrowserScreencastFramePacer({
     sendCommand,
@@ -82,46 +98,82 @@ export function createBrowserScreencastLane(
     isStopping,
     readZoomFactor: deps.readZoomFactor
   })
-  const snapshotCapture = createBrowserScreencastSnapshotCapture({
-    webContents,
-    dbg,
-    options,
-    isClosed,
-    isStopping,
-    stopSignal: AbortSignal.any([deps.streamStopSignal, stopRequested.signal]),
-    getSeq: framePacer.getSeq,
-    queueFrame: framePacer.queueFrame,
-    applyDeviceMetricsOverride: deps.applyDeviceMetricsOverride,
-    runExclusive: deps.runExclusiveCapture
-  })
   const restartScreencast = (): Promise<void> =>
     enqueue(async () => {
       if (!isClosed() && !isStopping()) {
         await startScreencast()
       }
     })
+  const enableDamageOnlyScreencast = (): void => {
+    if (damageOnlyScreencast) {
+      return
+    }
+    damageOnlyScreencast = true
+    void restartScreencast().catch(() => {})
+  }
   const motionQuality = createBrowserScreencastMotionQuality({
     options,
     isBacklogged: () => options.isViewerBacklogged?.() === true,
-    restartScreencast: () => void restartScreencast().catch(() => {}),
+    restartScreencast: () => {
+      if (!damageOnlyScreencast) {
+        void restartScreencast().catch(() => {})
+      }
+    },
     sendSharpFrame: () => void enqueue(() => snapshotCapture.emitStillFrame())
+  })
+  const queueLiveFrame = (frame: Parameters<typeof framePacer.queueFrame>[0]): void => {
+    const { imageWidth, imageHeight } = frame.metadata
+    motionQuality.noteLiveFrame(
+      imageWidth && imageHeight ? { width: imageWidth, height: imageHeight } : null
+    )
+    framePacer.queueFrame(frame)
+  }
+  const stopSignal = AbortSignal.any([deps.streamStopSignal, stopRequested.signal])
+  const snapshotCapture = createBrowserScreencastSnapshotCapture({
+    webContents,
+    dbg,
+    options,
+    isClosed,
+    isStopping,
+    stopSignal,
+    getSeq: framePacer.getSeq,
+    queueFrame: framePacer.queueFrame,
+    applyDeviceMetricsOverride: deps.applyDeviceMetricsOverride,
+    runExclusive: deps.runExclusiveCapture
+  })
+  const croppedLiveCapture = createBrowserScreencastCroppedLiveCapture({
+    webContents,
+    options,
+    isClosed,
+    isStopping,
+    stopSignal,
+    isDeviceMetricsOverridden: deps.isDeviceMetricsOverridden,
+    hasPendingNavigationCapture: snapshotCapture.hasPendingNavigationCapture,
+    bumpSnapshotGeneration: snapshotCapture.bumpGeneration,
+    scheduleViewportRecovery: () =>
+      snapshotCapture.scheduleNavigationFrameCapture('viewport-recovery'),
+    queueLiveFrame,
+    ackScreencastFrame: framePacer.ackFrame,
+    runExclusive: deps.runExclusiveCapture
   })
   const handleFrame = createBrowserScreencastFrameHandler({
     options,
     isClosed,
     isStopping,
-    queueFrame: (frame) => {
-      const { imageWidth, imageHeight } = frame.metadata
-      motionQuality.noteLiveFrame(
-        imageWidth && imageHeight ? { width: imageWidth, height: imageHeight } : null
-      )
-      framePacer.queueFrame(frame)
-    },
+    queueFrame: queueLiveFrame,
     ackScreencastFrame: framePacer.ackFrame,
     scheduleNavigationFrameCapture: snapshotCapture.scheduleNavigationFrameCapture,
     clearNavigationCaptureTimer: snapshotCapture.clearNavigationCaptureTimer,
     bumpSnapshotGeneration: snapshotCapture.bumpGeneration,
-    observeGuestViewSize: deps.observeGuestViewSize
+    observeGuestViewSize: deps.observeGuestViewSize,
+    isDamageOnlyScreencast: () => damageOnlyScreencast,
+    captureCroppedLiveFrame: (metadata, sessionId) => {
+      const handled = croppedLiveCapture.capture(metadata, sessionId)
+      if (handled) {
+        enableDamageOnlyScreencast()
+      }
+      return handled
+    }
   })
 
   const close = (): void => {
@@ -129,8 +181,10 @@ export function createBrowserScreencastLane(
       return
     }
     closed = true
+    damageOnlyScreencast = false
     motionQuality.dispose()
     snapshotCapture.clearNavigationCaptureTimer()
+    croppedLiveCapture.clearPending()
     framePacer.clearPending()
     deps.onStopped()
   }
@@ -141,7 +195,11 @@ export function createBrowserScreencastLane(
         if (isClosed() || isStopping()) {
           return
         }
+        const prevEveryNthFrame = options.everyNthFrame
         motionQuality.setFullBudget(budget)
+        if (damageOnlyScreencast && options.everyNthFrame === prevEveryNthFrame) {
+          return
+        }
         // Chromium needs a restart for frame caps; the pacer reads its interval live.
         await startScreencast()
       }),
@@ -150,10 +208,12 @@ export function createBrowserScreencastLane(
         return
       }
       stopping = true
+      damageOnlyScreencast = false
       stopRequested.abort()
       motionQuality.dispose()
       snapshotCapture.bumpGeneration()
       snapshotCapture.clearNavigationCaptureTimer()
+      croppedLiveCapture.clearPending()
       framePacer.clearPending(true)
       void enqueue(async () => {
         if (deps.isStreamClosed()) {
@@ -182,12 +242,24 @@ export function createBrowserScreencastLane(
       }
       snapshotCapture.bumpGeneration()
       snapshotCapture.clearNavigationCaptureTimer()
+      croppedLiveCapture.clearPending()
       framePacer.clearPending(true)
+      const viewportWidth = positiveInteger(options.viewportWidth)
+      const viewportHeight = positiveInteger(options.viewportHeight)
+      if (damageOnlyScreencast && (!viewportWidth || !viewportHeight)) {
+        damageOnlyScreencast = false
+        await startScreencast()
+      }
       // initialOnly would skip metrics updates once this lane has emitted a frame.
       await snapshotCapture.emitSnapshotFrame(false)
     },
     setViewport: (viewport) => {
       Object.assign(options, viewport)
+      const viewportWidth = positiveInteger(options.viewportWidth)
+      const viewportHeight = positiveInteger(options.viewportHeight)
+      if (damageOnlyScreencast && (!viewportWidth || !viewportHeight)) {
+        damageOnlyScreencast = false
+      }
     },
     getSeq: framePacer.getSeq,
     isStopped: () => isClosed() || stopping,

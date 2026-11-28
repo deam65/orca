@@ -60,6 +60,41 @@ public class OrcaMobileWebShellModule: Module {
       }
     }
 
+    Function("supportsScreencastFrames") { true }
+
+    Function("stageScreencastFrame") {
+      (sessionId: String, streamId: String, frameSeq: Int, mimeType: String, data: Data) -> String? in
+      MobileWebShellScreencastSessionRegistry.shared.stage(
+        sessionId: sessionId,
+        streamId: streamId,
+        frameSeq: frameSeq,
+        mimeType: mimeType,
+        data: data
+      )
+    }
+
+    Function("clearScreencastFrames") { (sessionId: String, streamId: String?) in
+      MobileWebShellScreencastSessionRegistry.shared.clear(sessionId: sessionId, streamId: streamId)
+    }
+
+    // Module-level session post avoids DynamicViewType's DispatchQueue.main.sync stall on Hermes.
+    AsyncFunction("postBridgeMessageForSession") {
+      (sessionId: String, json: String, promise: Promise) in
+      DispatchQueue.main.async {
+        guard let document = MobileWebShellDocumentRegistry.shared.document(for: sessionId) else {
+          promise.reject(MobileWebShellBridgeUnavailableException())
+          return
+        }
+        do {
+          try document.postBridgeMessage(json, promise: promise)
+        } catch let error as Exception {
+          promise.reject(error)
+        } catch {
+          promise.reject(MobileWebShellBridgeDeliveryFailedException(error.localizedDescription))
+        }
+      }
+    }
+
     AsyncFunction("presentPdf") { (url: URL) in
       guard let presenter = self.appContext?.utilities?.currentViewController() else {
         throw PdfPresenterUnavailableException()

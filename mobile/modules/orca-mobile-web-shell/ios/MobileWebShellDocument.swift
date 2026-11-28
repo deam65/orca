@@ -82,6 +82,7 @@ private final class MobileWebShellSchemeHandler: NSObject, WKURLSchemeHandler {
 
   var sessionId: String?
   var generation: MobileWebShellGeneration?
+  var screencastFrames: MobileWebShellScreencastFrameStore?
 
   func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
     let key = ObjectIdentifier(urlSchemeTask)
@@ -112,6 +113,24 @@ private final class MobileWebShellSchemeHandler: NSObject, WKURLSchemeHandler {
       liveTasks.remove(key)
       urlSchemeTask.didReceive(response)
       urlSchemeTask.didReceive(data)
+      urlSchemeTask.didFinish()
+      return
+    }
+    if let screencastFrames, let frame = screencastFrames.read(path: path) {
+      guard
+        let response = Self.makeResponse(
+          url: url,
+          contentType: frame.mimeType,
+          byteCount: frame.data.count,
+          path: path
+        )
+      else {
+        fail(urlSchemeTask, key)
+        return
+      }
+      liveTasks.remove(key)
+      urlSchemeTask.didReceive(response)
+      urlSchemeTask.didReceive(frame.data)
       urlSchemeTask.didFinish()
       return
     }
@@ -213,12 +232,45 @@ protocol MobileWebShellDocumentSink: AnyObject {
   func documentExternalNavigation(_ url: String)
 }
 
+/// Thread-safe weak document registry so module-level bridge posting skips UIKit main.sync view lookup.
+final class MobileWebShellDocumentRegistry {
+  static let shared = MobileWebShellDocumentRegistry()
+
+  private struct WeakDocument {
+    weak var value: MobileWebShellDocument?
+  }
+
+  private let lock = NSLock()
+  private var documents: [String: WeakDocument] = [:]
+
+  func register(sessionId: String, document: MobileWebShellDocument) {
+    lock.lock()
+    defer { lock.unlock() }
+    documents[sessionId] = WeakDocument(value: document)
+  }
+
+  func unregister(sessionId: String, document: MobileWebShellDocument) {
+    lock.lock()
+    defer { lock.unlock() }
+    if documents[sessionId]?.value === document || documents[sessionId]?.value == nil {
+      documents.removeValue(forKey: sessionId)
+    }
+  }
+
+  func document(for sessionId: String) -> MobileWebShellDocument? {
+    lock.lock()
+    defer { lock.unlock() }
+    return documents[sessionId]?.value
+  }
+}
+
 /// One WKWebView and every fence on it, apart from React. The view hosts it and lays it out.
 final class MobileWebShellDocument: NSObject, WKNavigationDelegate, WKUIDelegate {
   weak var sink: MobileWebShellDocumentSink?
   let webView: WKWebView
 
   private let schemeHandler = MobileWebShellSchemeHandler()
+  private let screencastFrames = MobileWebShellScreencastFrameStore()
   private let bridgeReceiver = MobileWebShellBridgeReceiver()
   private let bridgeGate = MobileWebShellBridgeGate()
   private var bridgeInstalled = false
@@ -229,6 +281,7 @@ final class MobileWebShellDocument: NSObject, WKNavigationDelegate, WKUIDelegate
   private var isolationReady = false
   private var isolationFailed = false
   private var destroyed = false
+  private var registeredSessionId: String?
   private let loadState = MobileWebShellLoadStateMachine()
   private var keyboardPreparationPending = false
   private var windowObservers: [NSObjectProtocol] = []
@@ -240,6 +293,7 @@ final class MobileWebShellDocument: NSObject, WKNavigationDelegate, WKUIDelegate
     // WebKit cannot disable DOM storage/databases; isolate with a non-persistent store, per-session origin and unmount destruction.
     configuration.websiteDataStore = .nonPersistent()
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+    schemeHandler.screencastFrames = screencastFrames
     // Disabling text interaction suppresses text after keydown; page user-select handles long-press selection.
     configuration.setURLSchemeHandler(schemeHandler, forURLScheme: MobileWebShellOrigin.scheme)
     configuration.userContentController.addUserScript(Self.makeBlockerScript())
@@ -272,9 +326,24 @@ final class MobileWebShellDocument: NSObject, WKNavigationDelegate, WKUIDelegate
   }
 
   deinit {
+    unregisterSession()
     for observer in windowObservers {
       NotificationCenter.default.removeObserver(observer)
     }
+  }
+
+  private func registerSession(_ sessionId: String) {
+    unregisterSession()
+    registeredSessionId = sessionId
+    MobileWebShellScreencastSessionRegistry.shared.register(sessionId: sessionId, store: screencastFrames)
+    MobileWebShellDocumentRegistry.shared.register(sessionId: sessionId, document: self)
+  }
+
+  private func unregisterSession() {
+    guard let sessionId = registeredSessionId else { return }
+    registeredSessionId = nil
+    MobileWebShellScreencastSessionRegistry.shared.unregister(sessionId: sessionId, store: screencastFrames)
+    MobileWebShellDocumentRegistry.shared.unregister(sessionId: sessionId, document: self)
   }
 
   /// Still showable: not torn down, and no terminal load failure or content-process loss.
@@ -282,6 +351,8 @@ final class MobileWebShellDocument: NSObject, WKNavigationDelegate, WKUIDelegate
 
   /// The spare pool's teardown; the content process goes with the last reference.
   func destroy() {
+    unregisterSession()
+    screencastFrames.clearAll()
     destroyed = true
     sink = nil
     clearBridgeTarget()
@@ -300,6 +371,7 @@ final class MobileWebShellDocument: NSObject, WKNavigationDelegate, WKUIDelegate
     )
     guard applied?.matches(next) != true else { return }
     applied = next
+    unregisterSession()
     clearBridgeTarget()
     loadState.reset()
     pendingDocumentUrl = nil
@@ -322,6 +394,8 @@ final class MobileWebShellDocument: NSObject, WKNavigationDelegate, WKUIDelegate
     }
     schemeHandler.sessionId = sessionId
     schemeHandler.generation = generation
+    screencastFrames.clearAll()
+    registerSession(sessionId)
     applyBridgeInstallation(bridgeEnabled)
     if isolationFailed {
       failPropUpdate(.isolationUnavailable)
@@ -333,6 +407,8 @@ final class MobileWebShellDocument: NSObject, WKNavigationDelegate, WKUIDelegate
 
   /// Retire the old visible generation even when the replacement fails.
   private func failPropUpdate(_ reason: MobileWebShellFailureReason) {
+    unregisterSession()
+    screencastFrames.clearAll()
     clearBridgeTarget()
     schemeHandler.sessionId = nil
     schemeHandler.generation = nil
@@ -434,6 +510,18 @@ final class MobileWebShellDocument: NSObject, WKNavigationDelegate, WKUIDelegate
   func postHostFrame(_ json: String) {
     guard let frame = bridgeTarget.frame else { return }
     webView.callAsyncJavaScript(bridgeDeliver, arguments: ["m": json], in: frame, in: .page) { _ in }
+  }
+
+  func stageScreencastFrame(streamId: String, frameSeq: Int, mimeType: String, data: Data) -> String? {
+    screencastFrames.stage(streamId: streamId, frameSeq: frameSeq, mimeType: mimeType, data: data)
+  }
+
+  func clearScreencastFrames(streamId: String?) {
+    if let streamId {
+      screencastFrames.clearStream(streamId: streamId)
+    } else {
+      screencastFrames.clearAll()
+    }
   }
 
   private func installNetworkBlock(into controller: WKUserContentController) {

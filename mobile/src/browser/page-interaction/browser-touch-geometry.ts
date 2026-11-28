@@ -125,6 +125,9 @@ export function browserWheelDeltaFromScreen(
 
 /** `Math.round` answers -0 for an axis that moved nothing; the wheel carries a plain zero. */
 function roundedWheelDelta(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0
+  }
   const rounded = Math.round(value)
   return rounded === 0 ? 0 : rounded
 }

@@ -8,7 +8,7 @@ import type {
 const MOTION_FRAME_GAP_MS = 100
 // The page counts as still once no live frame came for this long.
 const MOTION_QUIET_MS = 150
-const MOTION_QUALITY = 50
+const MOTION_QUALITY = 60
 // Page.startScreencast's smallest useful cap, as the budget normalizer clamps it.
 const MOTION_MIN_WIDTH = 320
 const MOTION_MIN_HEIGHT = 240

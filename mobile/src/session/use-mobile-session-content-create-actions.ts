@@ -9,6 +9,7 @@ import {
 import { sourceFileOpenRun } from '../files/session-documents/mobile-source-file-open-operations'
 import { sessionBrowserTabCreate } from '../browser/tab-navigation/mobile-session-browser-operations'
 import { sessionMarkdownNoteCreate } from '../files/session-documents/mobile-markdown-tab-operations'
+import { saveMobileBrowserViewMode } from '../browser/pane-view/mobile-browser-view-mode-state'
 import { interpretOrThrowRefusalMessage } from '../transport/rpc/rpc-refusal-message'
 import type {
   MobileBrowserNavigationMethod,
@@ -147,6 +148,8 @@ export function useMobileSessionContentCreateActions(
       )
       // Poll briefly for async host registration before focusing the new browser tab.
       if (created.browserPageId) {
+        // Tabs opened from mobile default to mobile view; users can still toggle back to web.
+        saveMobileBrowserViewMode(worktreeId, created.browserPageId, 'mobile')
         pendingBrowserFocusPageIdRef.current = created.browserPageId
       }
       void fetchSessionTabs()

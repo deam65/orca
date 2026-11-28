@@ -3,6 +3,7 @@ import { BRIDGE_PROTOCOL_VERSION } from '../../mobile-web-shell/bridge/protocol/
 import { METADATA_KEYS } from './browser-screencast-protocol'
 import {
   assembleMobileBrowserScreencastRequest,
+  MOBILE_HIGH_DENSITY_DEVICE_SCALE_FACTOR,
   MOBILE_VIEW_DEVICE_SCALE_FACTOR,
   type BrowserStreamLayout,
   type MobileBrowserScreencastRequest,
@@ -70,14 +71,26 @@ export function budgetedMobileViewDeviceScaleFactor(layout: BrowserStreamLayout 
 export function buildMobileBrowserScreencastRequest(
   layout: BrowserStreamLayout | null,
   pixelRatio: number,
-  viewMode: MobileBrowserViewMode = 'web'
+  viewMode: MobileBrowserViewMode = 'web',
+  frameUrlGranted = false
 ): MobileBrowserScreencastRequest | null {
+  const highDensity = frameUrlGranted
+  const mobileViewDeviceScaleFactor = frameUrlGranted
+    ? Math.max(
+        1,
+        Math.min(
+          MOBILE_HIGH_DENSITY_DEVICE_SCALE_FACTOR,
+          Number.isFinite(pixelRatio) ? pixelRatio : MOBILE_VIEW_DEVICE_SCALE_FACTOR
+        )
+      )
+    : viewMode === 'mobile'
+      ? budgetedMobileViewDeviceScaleFactor(layout)
+      : MOBILE_VIEW_DEVICE_SCALE_FACTOR
   return assembleMobileBrowserScreencastRequest(
     layout,
     pixelRatio,
     viewMode,
-    viewMode === 'mobile'
-      ? budgetedMobileViewDeviceScaleFactor(layout)
-      : MOBILE_VIEW_DEVICE_SCALE_FACTOR
+    mobileViewDeviceScaleFactor,
+    highDensity
   )
 }

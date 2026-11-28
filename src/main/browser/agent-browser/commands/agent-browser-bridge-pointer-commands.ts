@@ -218,14 +218,23 @@ export abstract class AgentBrowserBridgePointerCommands extends AgentBrowserBrid
     dy: number,
     dx?: number,
     worktreeId?: string,
-    browserPageId?: string
+    browserPageId?: string,
+    point?: { x: number; y: number }
   ): Promise<unknown> {
     return this.enqueueInertAction(
       worktreeId,
       browserPageId,
       async (sessionName, target) =>
         this.dispatchPointerEvent(sessionName, target, 'scroll', (state) => {
-          assertFinitePointerValues({ dy, ...(dx == null ? {} : { dx }) })
+          assertFinitePointerValues({
+            dy,
+            ...(dx == null ? {} : { dx }),
+            ...(point == null ? {} : point)
+          })
+          if (point) {
+            state.x = point.x
+            state.y = point.y
+          }
           const deltaX = dx ?? 0
           return {
             // Wheel events must target the scrollable under the tracked cursor.

@@ -2,20 +2,15 @@ import { Buffer } from 'node:buffer'
 import type { Debugger, WebContents } from 'electron'
 import { readBrowserScreencastImageSize } from './browser-screencast-image-size'
 import { runDebuggerCommandWithTimeout } from './browser-screencast-debugger-command'
-import {
-  holdPaintUntilCdpCaptureSettles,
-  holdPaintUntilSettled
-} from '../debugger/guest-paint-hold'
+import { holdPaintUntilCdpCaptureSettles } from '../debugger/guest-paint-hold'
+import { captureCroppedViewportImage } from './browser-screencast-cropped-live-capture'
 import type {
   BrowserScreencastOptions,
   PendingScreencastFrame
 } from './browser-screencast-stream-types'
-import { positiveInteger, scaleSnapshotToFit } from './browser-screencast-viewport-fit'
-import { withTimeout } from '../../../../shared/concurrency/promise-timeout-fallback'
-import { waitForPromiseWithSignal } from '../../../../shared/concurrency/abort-signal-reason'
+import { positiveInteger } from './browser-screencast-viewport-fit'
 
-// Bound capture time so queued viewport updates and stop can proceed.
-const SNAPSHOT_CAPTURE_TIMEOUT_MS = 10_000
+const STILL_FRAME_MIN_QUALITY = 92
 
 type BrowserScreencastSnapshotCaptureDeps = {
   webContents: WebContents
@@ -33,11 +28,17 @@ type BrowserScreencastSnapshotCaptureDeps = {
 }
 
 export type BrowserScreencastSnapshotCapture = {
-  emitSnapshotFrame: (initialOnly: boolean, generation?: number) => Promise<void>
+  emitSnapshotFrame: (
+    initialOnly: boolean,
+    generation?: number,
+    qualityOverride?: number,
+    skipDeviceMetricsOverride?: boolean
+  ) => Promise<void>
   /** A capture that a newer live frame makes stale, so it never replaces one. */
   emitStillFrame: () => Promise<void>
   scheduleNavigationFrameCapture: (reason?: 'navigation' | 'viewport-recovery') => void
   clearNavigationCaptureTimer: () => void
+  hasPendingNavigationCapture: () => boolean
   bumpGeneration: () => void
 }
 
@@ -89,49 +90,48 @@ export function createBrowserScreencastSnapshotCapture(
     (initialOnly && getSeq() > 0) ||
     (generation !== undefined && generation !== snapshotGeneration)
 
-  const emitSnapshotFrame = (initialOnly: boolean, generation?: number): Promise<void> =>
-    deps.runExclusive(() => captureSnapshotFrame(initialOnly, generation))
+  const emitSnapshotFrame = (
+    initialOnly: boolean,
+    generation?: number,
+    qualityOverride?: number,
+    skipDeviceMetricsOverride = false
+  ): Promise<void> =>
+    deps.runExclusive(() =>
+      captureSnapshotFrame(initialOnly, generation, qualityOverride, skipDeviceMetricsOverride)
+    )
 
-  const captureSnapshotFrame = async (initialOnly: boolean, generation?: number): Promise<void> => {
+  const captureSnapshotFrame = async (
+    initialOnly: boolean,
+    generation?: number,
+    qualityOverride?: number,
+    skipDeviceMetricsOverride = false
+  ): Promise<void> => {
     if (isSnapshotStale(initialOnly, generation)) {
       return
     }
     try {
       const viewportWidth = positiveInteger(options.viewportWidth)
       const viewportHeight = positiveInteger(options.viewportHeight)
+      const quality = qualityOverride ?? options.quality
       let image: Uint8Array | null = null
-      await applyDeviceMetricsOverride()
+      if (!skipDeviceMetricsOverride) {
+        await applyDeviceMetricsOverride()
+      }
       if (isSnapshotStale(initialOnly, generation)) {
         return
       }
       if (viewportWidth && viewportHeight && typeof webContents.capturePage === 'function') {
         try {
-          // Prefer capturePage to avoid CDP tiling; stopped compositing can leave it pending.
-          const nativeImage = await withTimeout(
-            waitForPromiseWithSignal(
-              holdPaintUntilSettled(holdPaint, () =>
-                webContents.capturePage({
-                  x: 0,
-                  y: 0,
-                  width: viewportWidth,
-                  height: viewportHeight
-                })
-              ),
-              stopSignal
-            ),
-            SNAPSHOT_CAPTURE_TIMEOUT_MS,
-            null
-          )
+          image = await captureCroppedViewportImage({
+            webContents,
+            options,
+            stopSignal,
+            viewportWidth,
+            viewportHeight,
+            quality
+          })
           if (isSnapshotStale(initialOnly, generation)) {
             return
-          }
-          if (nativeImage) {
-            const capture = scaleSnapshotToFit(nativeImage, options)
-            const buffer =
-              options.format === 'png' ? capture.toPNG() : capture.toJPEG(options.quality)
-            if (buffer.byteLength > 0) {
-              image = new Uint8Array(buffer)
-            }
           }
         } catch {
           image = null
@@ -140,7 +140,7 @@ export function createBrowserScreencastSnapshotCapture(
       if (!image) {
         const screenshotParams = {
           format: options.format,
-          ...(options.format === 'jpeg' ? { quality: options.quality } : {}),
+          ...(options.format === 'jpeg' ? { quality } : {}),
           ...(viewportWidth && viewportHeight
             ? {
                 // Keep fallback frames in the live viewport's coordinate space under mobile emulation and DPR.
@@ -197,9 +197,17 @@ export function createBrowserScreencastSnapshotCapture(
 
   return {
     emitSnapshotFrame,
-    emitStillFrame: () => emitSnapshotFrame(false, ++snapshotGeneration),
+    emitStillFrame: () =>
+      emitSnapshotFrame(
+        false,
+        ++snapshotGeneration,
+        Math.min(100, Math.max(options.quality, STILL_FRAME_MIN_QUALITY)),
+        true
+      ),
     scheduleNavigationFrameCapture,
     clearNavigationCaptureTimer,
+    hasPendingNavigationCapture: () =>
+      navigationCaptureTimer !== null || navigationCaptureGeneration !== null,
     bumpGeneration: () => {
       snapshotGeneration += 1
     }

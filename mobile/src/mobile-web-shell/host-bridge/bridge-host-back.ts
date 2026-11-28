@@ -9,6 +9,8 @@ export type BridgeSessionBack = {
   readonly storageKeys?: readonly string[]
   /** The page's `ready` said it reads `connectionPath` frames. */
   readonly connectionPathFrames?: true
+  /** The page's `ready` said it reads `screencastFrameUrls` frames. */
+  readonly screencastFrameUrls?: true
   /** The page's `ready` said it reads `appInactive` frames. */
   readonly appInactiveFrames?: true
   /** The page's `ready` said it answers `appResumed` frames. */

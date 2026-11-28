@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
+import { useLayoutEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
 import {
   PanResponder,
   type GestureResponderEvent,
@@ -17,18 +17,20 @@ import {
   readLocalTouchPoint,
   type BrowserFrameGeometry,
   type BrowserTouchLayout,
-  type BrowserZoomState
+  type BrowserZoomState,
+  type BrowserPoint
 } from './browser-touch-geometry'
 import type { BrowserPointerModifier } from '../pane-view/MobileBrowserPointerModifiers'
 import type { BrowserDialogState } from '../screencast/mobile-browser-stream-events'
 import type { BrowserPageCommandSend, BrowserPageParams } from './use-mobile-browser-request'
 import type { BrowserScreencastFrameMetadata } from '../screencast/browser-screencast-protocol'
-
+import { createTouchScrollVelocity, useBrowserScrollMomentum } from './browser-scroll-momentum'
 import { useMobileBrowserCommands } from './use-mobile-browser-commands'
-const TAP_SLOP = 16
-const SCROLL_START_SLOP = 22
+
+const TAP_SLOP = 12
+const SCROLL_START_SLOP = 10
 const LONG_PRESS_MS = 550
-const WHEEL_INTERVAL_MS = 40
+const WHEEL_INTERVAL_MS = 16
 
 type PanGesture = { x: number; y: number; offsetX: number; offsetY: number }
 type SendBrowserRequest = (
@@ -39,9 +41,7 @@ type SendBrowserRequest = (
 type MobileBrowserInteractionArgs = {
   clearLongPressTimer: () => void
   client: RpcClient | null
-  /** True while a dialog or prompt card covers the page, so touches never reach the page under it. */
   pageCoveredRef: { current: boolean }
-  /** Set when a card covered the page mid-touch; the rest of that touch never reaches the page. */
   gestureCancelledRef: { current: boolean }
   frameGeometry: BrowserFrameGeometry | null
   frameMetadataRef: { current: BrowserScreencastFrameMetadata | null }
@@ -67,32 +67,25 @@ type MobileBrowserInteractionArgs = {
 export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs) {
   const {
     clearLongPressTimer,
-    client,
     pageCoveredRef,
     gestureCancelledRef,
     frameGeometry,
-    frameMetadataRef,
-    keyboardValue,
-    layoutRef,
     longPressTimerRef,
     onToast,
-    pageParams,
     panRef,
     pinchRef,
-    pointerModifiers,
     scrollingRef,
-    sendBrowserRequest,
-    setDialog,
-    setError,
-    setKeyboardValue,
-    setPointerModifiers,
     setZoom,
     startPointRef,
     zoomRef
   } = args
+
   const rightClickSentRef = useRef(false)
   const lastWheelRef = useRef({ dx: 0, dy: 0, at: 0 })
   const wheelGestureIdRef = useRef(0)
+  const lastScrollPointRef = useRef<BrowserPoint | null>(null)
+  const velocityRef = useRef(createTouchScrollVelocity())
+
   const {
     mapTouchPoint,
     sendDialogCommand,
@@ -101,32 +94,29 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
     sendPointerClick,
     sendWheel,
     togglePointerModifier
-  } = useMobileBrowserCommands({
-    client,
-    frameMetadataRef,
-    keyboardValue,
-    layoutRef,
-    onToast,
-    pageParams,
-    pointerModifiers,
-    sendBrowserRequest,
-    setDialog,
-    setError,
-    setKeyboardValue,
-    setPointerModifiers,
-    zoomRef
+  } = useMobileBrowserCommands(args)
+
+  const { cancelMomentum, startMomentum } = useBrowserScrollMomentum({
+    pageCoveredRef,
+    sendWheel
   })
 
-  const handleResponderGrant = useCallback(
-    (event: GestureResponderEvent) => {
+  const clearActiveGesture = () => {
+    clearLongPressTimer()
+    pinchRef.current = null
+    panRef.current = null
+    scrollingRef.current = false
+    startPointRef.current = null
+  }
+
+  const latestHandlers = {
+    onGrant: (event: GestureResponderEvent) => {
+      cancelMomentum()
       gestureCancelledRef.current = false
       const pinch = createPinchGesture(event, frameGeometry, zoomRef.current)
       if (pinch) {
-        clearLongPressTimer()
+        clearActiveGesture()
         pinchRef.current = pinch
-        panRef.current = null
-        scrollingRef.current = false
-        startPointRef.current = null
         return
       }
       const startPoint = readLocalTouchPoint(event.nativeEvent)
@@ -138,6 +128,8 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
       scrollingRef.current = false
       wheelGestureIdRef.current += 1
       lastWheelRef.current = { dx: 0, dy: 0, at: 0 }
+      lastScrollPointRef.current = mapTouchPoint(startPoint.x, startPoint.y)
+      velocityRef.current.reset(startPoint.x, startPoint.y, Date.now())
       panRef.current =
         zoomRef.current.scale > MIN_ZOOM
           ? {
@@ -162,29 +154,7 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
         onToast('Right click')
       }, LONG_PRESS_MS)
     },
-    [clearLongPressTimer, frameGeometry, mapTouchPoint, onToast, sendPointerClick]
-  )
-
-  const flushWheelDelta = useCallback(
-    (event: GestureResponderEvent, gesture: PanResponderGestureState, at: number) => {
-      const deltaX = gesture.dx - lastWheelRef.current.dx
-      const deltaY = gesture.dy - lastWheelRef.current.dy
-      if (Math.abs(deltaX) + Math.abs(deltaY) < 8) {
-        return
-      }
-      const touch = readLocalTouchPoint(event.nativeEvent)
-      const point = touch ? mapTouchPoint(touch.x, touch.y) : null
-      if (!point) {
-        return
-      }
-      lastWheelRef.current = { dx: gesture.dx, dy: gesture.dy, at }
-      sendWheel(point, deltaX, deltaY, wheelGestureIdRef.current)
-    },
-    [mapTouchPoint, sendWheel]
-  )
-
-  const handleResponderMove = useCallback(
-    (event: GestureResponderEvent, gesture: PanResponderGestureState) => {
+    onMove: (event: GestureResponderEvent, gesture: PanResponderGestureState) => {
       if (gestureCancelledRef.current) {
         return
       }
@@ -192,11 +162,8 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
         ? null
         : createPinchGesture(event, frameGeometry, zoomRef.current)
       if (startedPinch) {
-        clearLongPressTimer()
+        clearActiveGesture()
         pinchRef.current = startedPinch
-        panRef.current = null
-        scrollingRef.current = false
-        startPointRef.current = null
       }
       const activePinch = pinchRef.current
       const nextPinch = activePinch ? updatePinchZoom(event, frameGeometry, activePinch) : null
@@ -245,17 +212,32 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
         scrollingRef.current = true
         startPointRef.current = null
       }
+
       const now = Date.now()
+      const touch = readLocalTouchPoint(event.nativeEvent)
+      if (touch) {
+        const mapped = mapTouchPoint(touch.x, touch.y)
+        if (mapped) {
+          lastScrollPointRef.current = mapped
+        }
+        velocityRef.current.sample(touch.x, touch.y, now)
+      }
       if (now - lastWheelRef.current.at < WHEEL_INTERVAL_MS) {
         return
       }
-      flushWheelDelta(event, gesture, now)
+      const deltaX = gesture.dx - lastWheelRef.current.dx
+      const deltaY = gesture.dy - lastWheelRef.current.dy
+      if (Math.abs(deltaX) + Math.abs(deltaY) < 2) {
+        return
+      }
+      const point = lastScrollPointRef.current
+      if (!point) {
+        return
+      }
+      lastWheelRef.current = { dx: gesture.dx, dy: gesture.dy, at: now }
+      sendWheel(point, deltaX, deltaY, wheelGestureIdRef.current)
     },
-    [clearLongPressTimer, flushWheelDelta, frameGeometry]
-  )
-
-  const handleResponderRelease = useCallback(
-    (event: GestureResponderEvent, gesture: PanResponderGestureState) => {
+    onRelease: (event: GestureResponderEvent, gesture: PanResponderGestureState) => {
       clearLongPressTimer()
       const wasPinching = pinchRef.current !== null
       const wasPanning = panRef.current !== null
@@ -266,7 +248,19 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
       const wasScrolling = scrollingRef.current
       scrollingRef.current = false
       if (wasScrolling && !wasPanning && !wasPinching) {
-        flushWheelDelta(event, gesture, Date.now())
+        const deltaX = gesture.dx - lastWheelRef.current.dx
+        const deltaY = gesture.dy - lastWheelRef.current.dy
+        const touchPoint = readLocalTouchPoint(event.nativeEvent)
+        const point =
+          lastScrollPointRef.current ??
+          (touchPoint ? mapTouchPoint(touchPoint.x, touchPoint.y) : null)
+        if (Math.abs(deltaX) + Math.abs(deltaY) >= 1 && point) {
+          sendWheel(point, deltaX, deltaY, wheelGestureIdRef.current)
+        }
+        if (point) {
+          const { vx, vy } = velocityRef.current.read()
+          startMomentum(point, vx, vy, wheelGestureIdRef.current)
+        }
         return
       }
       if (!start || rightClickSentRef.current || wasScrolling) {
@@ -274,7 +268,6 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
       }
       const moved = Math.hypot(gesture.dx, gesture.dy)
       if (moved <= TAP_SLOP && Date.now() - start.t < LONG_PRESS_MS) {
-        // Resolve native taps at touch-up; touch-down makes finger drift feel like click lands off target.
         const release = readLocalTouchPoint(event.nativeEvent) ?? start
         const point = mapTouchPoint(release.x, release.y)
         if (point) {
@@ -282,30 +275,37 @@ export function useMobileBrowserInteractions(args: MobileBrowserInteractionArgs)
         }
       }
     },
-    [clearLongPressTimer, flushWheelDelta, mapTouchPoint, sendPointerClick]
-  )
+    onTerminate: () => {
+      cancelMomentum()
+      clearActiveGesture()
+    }
+  }
+  const handlersRef = useRef(latestHandlers)
+  useLayoutEffect(() => {
+    handlersRef.current = latestHandlers
+  })
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => !pageCoveredRef.current,
         onMoveShouldSetPanResponder: () => !pageCoveredRef.current,
-        onPanResponderGrant: handleResponderGrant,
-        onPanResponderMove: handleResponderMove,
-        onPanResponderRelease: handleResponderRelease,
-        onPanResponderTerminate: () => {
-          clearLongPressTimer()
-          pinchRef.current = null
-          panRef.current = null
-          scrollingRef.current = false
-          startPointRef.current = null
-        },
-        // The long-press right-click outlives the WebView's own long-press contextmenu at ~500 ms.
+        onPanResponderGrant: (e) => handlersRef.current.onGrant(e),
+        onPanResponderMove: (e, g) => handlersRef.current.onMove(e, g),
+        onPanResponderRelease: (e, g) => handlersRef.current.onRelease(e, g),
+        onPanResponderTerminate: () => handlersRef.current.onTerminate(),
         onPanResponderTerminationRequest: (event) =>
           !('type' in event.nativeEvent) || event.nativeEvent.type !== 'contextmenu'
       }),
-    [clearLongPressTimer, handleResponderGrant, handleResponderMove, handleResponderRelease]
+    [pageCoveredRef]
   )
 
-  return { panResponder, sendDialogCommand, sendKeyboardText, sendKeypress, togglePointerModifier }
+  return {
+    cancelMomentum,
+    panResponder,
+    sendDialogCommand,
+    sendKeyboardText,
+    sendKeypress,
+    togglePointerModifier
+  }
 }

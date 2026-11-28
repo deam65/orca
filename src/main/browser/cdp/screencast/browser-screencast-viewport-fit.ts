@@ -37,7 +37,7 @@ export function scaleSnapshotToFit(
   if (fitted.width === size.width && fitted.height === size.height) {
     return image
   }
-  return image.resize(fitted)
+  return image.resize({ ...fitted, quality: 'good' })
 }
 
 function isNearSize(

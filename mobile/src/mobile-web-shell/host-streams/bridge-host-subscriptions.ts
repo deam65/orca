@@ -3,10 +3,9 @@ import { MOBILE_BRIDGE_MAX_FRAME_BYTES as BRIDGE_MAX_MESSAGE_BYTES } from '../..
 import { BRIDGE_PROTOCOL_VERSION } from '../bridge/protocol/bridge-frame-fields'
 import type { BridgeHostMessage } from '../bridge/protocol/bridge-envelope'
 import {
-  bridgeScreencastBase64Length,
-  bridgeScreencastFrameHeader,
-  encodeBridgeScreencastFrame
-} from '../bridge/screencast/bridge-screencast-encoder'
+  prepareBridgeScreencastFrame,
+  type ScreencastFrameStager
+} from './bridge-screencast-frame-delivery'
 import {
   BridgeTerminalOutputBacklog,
   drainTerminalBacklog,
@@ -15,7 +14,6 @@ import {
   type TerminalBacklogEnd,
   type TerminalBacklogTimers
 } from './bridge-terminal-output-backlog'
-import type { BridgeBinaryEvent } from '../bridge/screencast/bridge-screencast-binary'
 import type { BrowserScreencastFrame } from '../../browser/screencast/browser-screencast-protocol'
 import type { RpcClient } from '../../transport/rpc/rpc-client-contract'
 import type { RpcEnvelopeFields } from '../../transport/rpc/rpc-envelope-fields'
@@ -60,6 +58,9 @@ export class BridgeHostSubscriptions {
     private readonly options: {
       client: RpcClient
       post: (json: string) => void
+      stageScreencastFrame?: ScreencastFrameStager
+      clearScreencastFrames?: (streamId: string | null) => void
+      canUseFrameUrls?: () => boolean
       onBinaryFrameDropped: (dropped: BridgeDroppedBinaryFrame) => void
       onTerminalBacklog?: (report: BridgeTerminalBacklogReport) => void
       terminalTimers?: TerminalBacklogTimers
@@ -162,6 +163,9 @@ export class BridgeHostSubscriptions {
     this.open.delete(id)
     this.reportBacklog(id, record, null)
     try {
+      this.options.clearScreencastFrames?.(id)
+    } catch {}
+    try {
       record.unsubscribe()
     } catch {
       // A client whose unsubscribe throws must not keep the rest of the ledger open.
@@ -176,6 +180,9 @@ export class BridgeHostSubscriptions {
     for (const id of this.open.keys()) {
       this.cancel(id, reason)
     }
+    try {
+      this.options.clearScreencastFrames?.(null)
+    } catch {}
   }
 
   private deliver(id: string, payload: unknown): void {
@@ -210,25 +217,20 @@ export class BridgeHostSubscriptions {
       return
     }
     const seq = record.seq + 1
-    // Measure envelope plus exact ASCII base64 length before encoding; a closed window must not pay for full-image passes on discarded frames.
-    const bytes =
-      utf8ByteLength(this.binaryEventJson(id, seq, bridgeScreencastFrameHeader(frame))) +
-      bridgeScreencastBase64Length(frame.image.byteLength)
-    if (!this.canCarry(record, bytes)) {
-      this.dropBinaryFrame(id, record, bytes)
+    const plan = prepareBridgeScreencastFrame({
+      id,
+      seq,
+      frame,
+      canUseFrameUrls: this.options.canUseFrameUrls,
+      stageScreencastFrame: this.options.stageScreencastFrame,
+      windowHasRoom: () => this.windowHasRoom(record),
+      canCarry: (bytes) => this.canCarry(record, bytes)
+    })
+    if (plan.kind === 'drop') {
+      this.dropBinaryFrame(id, record, plan.bytes)
       return
     }
-    this.sendEvent(
-      id,
-      record,
-      seq,
-      this.binaryEventJson(id, seq, encodeBridgeScreencastFrame(frame)),
-      true
-    )
-  }
-
-  private binaryEventJson(id: string, seq: number, binary: BridgeBinaryEvent): string {
-    return JSON.stringify({ v: BRIDGE_PROTOCOL_VERSION, type: 'event', id, seq, binary })
+    this.sendEvent(id, record, seq, plan.json, true)
   }
 
   private windowHasRoom(record: OpenSubscription): boolean {

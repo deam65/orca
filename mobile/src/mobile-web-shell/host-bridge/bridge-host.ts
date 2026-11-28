@@ -8,7 +8,8 @@ import { BridgeHostSubscriptions } from '../host-streams/bridge-host-subscriptio
 import { createBridgeHostStreamFrames } from '../host-streams/bridge-host-stream-frames'
 import {
   BRIDGE_PROTOCOL_VERSION,
-  BRIDGE_SHELL_GRANTS
+  BRIDGE_SHELL_GRANTS,
+  BRIDGE_SCREENCAST_FRAME_URL_GRANT
 } from '../bridge/protocol/bridge-frame-fields'
 import {
   readBridgeClientMessage,
@@ -29,7 +30,11 @@ import type { BridgeHost, BridgeHostOptions } from './bridge-host-contract'
 // Bind the host structurally to one RPC client; the protocol lets pages name no other host. Native origin checks reject expired sessions, and init caps are enforced here.
 export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
   const { client, buildId, sessionId, pageRoutes, host } = options
-  const granted: readonly string[] = [...BRIDGE_SHELL_GRANTS, ...options.routeGrants]
+  const granted: readonly string[] = [
+    ...BRIDGE_SHELL_GRANTS,
+    ...options.routeGrants,
+    ...(options.stageScreencastFrame !== undefined ? [BRIDGE_SCREENCAST_FRAME_URL_GRANT] : [])
+  ]
   // Validate manifest pairs like the route: a pair refused by the page would invalidate the entire init.
   const parsedRouteGrants =
     options.pageRouteGrants === undefined
@@ -79,6 +84,9 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
     client,
     holdReplay: verdict.holdReplay,
     post: sendJson,
+    stageScreencastFrame: options.stageScreencastFrame,
+    clearScreencastFrames: options.clearScreencastFrames,
+    canUseFrameUrls: () => pageReaders.screencastFrameUrls,
     onBinaryFrameDropped: ({ id, bytes, droppedOnStream }) => {
       options.onDiagnostic?.({ kind: 'binary-frame-dropped', id, bytes, dropped: droppedOnStream })
       options.onBinaryFramesDropped?.(subscriptions.droppedBinaryFrames)
@@ -92,28 +100,13 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
   // Use the event’s state; listeners can run before the mirrored getter updates.
   const snapshot = (state?: ConnectionState) => verdict.snapshot(client, state)
 
-  /**
-   * Posts `init`, and answers nothing (ruling 34).
-   *
-   * Sent every time it is asked for, with the keys read every time it is sent. A page that saw a
-   * `state` older than the one it holds recovers by asking again rather than by living with a
-   * cache it knows is wrong, and the same is true of its storage: a document that reloads inside
-   * one mount — which the fault path produces — would otherwise be primed from before its own
-   * writes, and `publishPageStorage` clears the page's cache to match.
-   *
-   * The frame is built synchronously, because the page refuses every member until `init` lands and
-   * the golden recorder mounts its screen in the same turn it drains one; a frame whose contents
-   * waited on a promise would change what the first render of every replay sees.
-   *
-   * A refused route sends nothing at all, and a post the view would not take is one diagnostic and
-   * no further attempt: nothing here holds a frame, and nothing retries one.
-   */
   function sendInit(refreshTerminalShortcuts = false): void {
     const route = routes.current()
-    if (route === null || (refreshTerminalShortcuts && !deliverable())) {
-      return
-    }
-    if (!pageReaders.accepts(route)) {
+    if (
+      route === null ||
+      (refreshTerminalShortcuts && !deliverable()) ||
+      !pageReaders.accepts(route)
+    ) {
       return
     }
     initSent = true
@@ -171,7 +164,6 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
     report: (diagnostic) => options.onDiagnostic?.(diagnostic)
   })
 
-  // Check the outbound gates before consuming native Back; returning true for an unsent frame would swallow the key.
   const deliverable = (): boolean => !closed && serving && initSent
 
   const back = createBridgeHostBack({
@@ -215,16 +207,11 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
   }
 
   function dispatch(message: BridgeClientMessage): void {
-    // Every ready claims the view, whether a new document or a repeated ask.
     if (message.type === 'ready') {
       serving = true
       pageReaders.ready(message)
       back.readReady()
-      // Dropped like the Back claim: a page still showing a terminal claims again on this `init`.
       reportRailClaim(false)
-      // Every time it is asked, not once: the page re-asks on a backoff, and each ask is answered
-      // with the route the shell holds now. That is the whole repair path for a frame that never
-      // arrived (ruling 34) — nothing here waits on one, and nothing retries one.
       sendInit()
       options.onPageReady()
       return
@@ -233,7 +220,6 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
       options.onDiagnostic?.({ kind: 'frame-after-close' })
       return
     }
-    // A session with no handshake has no grants/caps; refuse requests and streams too. Inherited handshake state keeps client-rebuilt hosts serving live pages.
     if (!initSent && isDesktopBound(message)) {
       options.onDiagnostic?.({ kind: 'notify-refused', name: message.method, why: 'before-ready' })
       sendError(message.id, new BridgeCapExceededError('before-ready'))
@@ -264,7 +250,6 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
         forwardNotify(message)
         return
       case 'close':
-        // Close is not host disposal; the next document sends ready over this same view.
         settleAll(false)
         serving = false
         back.drop()
@@ -320,20 +305,11 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
       if (!railClaimed || inputOwner !== railOwner || !deliverable()) {
         return false
       }
-      send({
-        v: BRIDGE_PROTOCOL_VERSION,
-        type: BRIDGE_TERMINAL_KEY_FRAME,
-        key,
-        inputOwner
-      })
+      send({ v: BRIDGE_PROTOCOL_VERSION, type: BRIDGE_TERMINAL_KEY_FRAME, key, inputOwner })
       return true
     },
-    publishColorScheme: (next) => {
-      routes.publishColorScheme(next, deliverable())
-    },
-    publishUiLocale: (next) => {
-      routes.publishUiLocale(next, deliverable())
-    },
+    publishColorScheme: (next) => routes.publishColorScheme(next, deliverable()),
+    publishUiLocale: (next) => routes.publishUiLocale(next, deliverable()),
     sendAppFrame: (frame) => {
       if (pageReaders.reads(frame.type) && deliverable()) {
         send({ v: BRIDGE_PROTOCOL_VERSION, ...frame })

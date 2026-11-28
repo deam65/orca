@@ -43,6 +43,7 @@ export type BrowserScreencastFrame = {
   image: Uint8Array
   // Preserve bridge-provided base64 for data URIs without re-encoding; socket frames still provide bytes in image.
   b64?: string
+  frameUrl?: string
 }
 
 function byteToFormat(value: number): BrowserScreencastFormat | null {

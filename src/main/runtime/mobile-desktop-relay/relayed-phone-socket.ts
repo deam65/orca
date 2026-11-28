@@ -1,3 +1,4 @@
+import { readBrowserScreencastFrameSeq } from '../../../shared/browser/screencast/browser-screencast-protocol'
 import { RemoteRuntimeClientError } from '../../../shared/remote-runtime/remote-runtime-client-error'
 import { openRemoteRuntimePassthroughSocket } from '../../../shared/remote-runtime/remote-runtime-passthrough-socket'
 import { pairedRuntimeConnectionFromOffer } from '../../../shared/remote-runtime/pairing/paired-runtime-connection'
@@ -31,7 +32,8 @@ export async function openRelayedPhoneSocket(
         onBinary: (bytes) => {
           const frame = link.replies.binary(bytes)
           if (frame) {
-            link.phone.sendBinary(frame)
+            const isScreencast = readBrowserScreencastFrameSeq(frame) !== null
+            link.phone.sendBinary(frame, isScreencast ? { dropWhenBacklogged: true } : undefined)
           }
         },
         onClose: (error) => endLink(error)

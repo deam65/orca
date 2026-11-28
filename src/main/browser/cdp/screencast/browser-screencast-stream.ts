@@ -113,6 +113,7 @@ export async function startBrowserScreencast(
       enqueue,
       readZoomFactor,
       applyDeviceMetricsOverride: viewport.applyDeviceMetricsOverride,
+      isDeviceMetricsOverridden: deviceMetrics.isOverridden,
       runExclusiveCapture,
       observeGuestViewSize: viewport.observeGuestViewSize,
       sendPageCommand,

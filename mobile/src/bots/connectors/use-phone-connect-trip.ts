@@ -12,6 +12,7 @@ import {
   type RefObject
 } from 'react'
 import { sessionBrowserTabCreate } from '../../browser/tab-navigation/mobile-session-browser-operations'
+import { saveMobileBrowserViewMode } from '../../browser/pane-view/mobile-browser-view-mode-state'
 import type { RpcClient } from '../../transport/rpc/rpc-client-contract'
 import { connectCancel } from './bot-connector-account-operations'
 import {
@@ -163,6 +164,10 @@ export function usePhoneConnectTrips(
         }
         if (current()) {
           const page = { url, browserPageId: opened.browserPageId ?? null }
+          if (opened.browserPageId) {
+            // Tabs opened from mobile default to mobile view; users can still toggle back to web.
+            saveMobileBrowserViewMode(worktreeId, opened.browserPageId, 'mobile')
+          }
           setCurrent({ source, trip: { status: 'waiting', since, page } })
         }
         const until = Date.now() + TRIP_MS

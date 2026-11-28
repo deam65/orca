@@ -6,9 +6,10 @@ import type {
 } from '../bridge/native-capabilities/bridge-terminal-key'
 import type { BridgePageGeometry } from '../bridge/page-geometry/bridge-page-geometry'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type {
-  MobileWebShellBridgeMessagePayload,
-  OrcaMobileWebShellViewHandle
+import {
+  postBridgeMessageForSession,
+  type MobileWebShellBridgeMessagePayload,
+  type OrcaMobileWebShellViewHandle
 } from '../../../modules/orca-mobile-web-shell/src/index'
 import { useHostClient } from '../../transport/connection/host-client-hooks'
 import { createBridgeDiagnosticReporter } from '../diagnostics/bridge-diagnostic-log'
@@ -21,7 +22,7 @@ import type { BridgeSafeAreaInsets } from '../bridge/page-geometry/bridge-safe-a
 import type { BridgeFoldDivision } from '../bridge/page-geometry/bridge-fold-division'
 import type { BridgeHapticsKind } from '../bridge/native-capabilities/bridge-haptics-notify'
 import { createBridgeHost } from '../host-bridge/bridge-host'
-import { latestBridgeCallbacks } from './bridge-latest-callbacks'
+import { latestBridgeCallbacks, screencastFrameCallbacks } from './bridge-latest-callbacks'
 import { usePageAppPresence } from './use-page-app-presence'
 import type { BridgeHost, BridgeNavigateBackOutcome } from '../host-bridge/bridge-host-contract'
 import type { BridgeSessionBack } from '../host-bridge/bridge-host-back'
@@ -181,10 +182,14 @@ export function useMobileWebShellBridge(args: MobileWebShellBridgeArgs): MobileW
       readClientIdentity: () => clientIdRef.current,
       post: (json) => {
         const mounted = viewRef.current
-        return mounted === null || mounted.sessionId !== sessionId
-          ? Promise.reject(new BridgeViewGoneError())
-          : mounted.handle.postBridgeMessage(json)
+        if (mounted === null || mounted.sessionId !== sessionId) {
+          return Promise.reject(new BridgeViewGoneError())
+        }
+        return (
+          postBridgeMessageForSession(sessionId, json) ?? mounted.handle.postBridgeMessage(json)
+        )
       },
+      ...screencastFrameCallbacks(sessionId, viewRef),
       onDiagnostic: createBridgeDiagnosticReporter((diagnostic) => {
         const line = bridgeDiagnosticLine(diagnostic)
         if (line !== null) {
